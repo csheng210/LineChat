@@ -23,3 +23,6 @@ __pycache__/
 *.log
 Thumbs.db
 .DS_Store
+
+# 清理暫存(非專案)
+_discarded/
