@@ -1,0 +1,15 @@
+{
+  "name": "linechat-actions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LineChat 瀏覽器動作後端 (Fastify + Playwright): 封裝送訊息等需驅動 Chrome 的操作, 保持前端乾淨。",
+  "scripts": {
+    "start": "node src/server.mjs",
+    "dev": "node --watch src/server.mjs"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "playwright": "1.63.0"
+  }
+}

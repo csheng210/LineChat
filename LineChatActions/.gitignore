@@ -1,0 +1,5 @@
+node_modules/
+*.log
+.env
+# 允許範本檔入库(根 .gitignore 的 .env.* 會誤擋它)
+!.env.example

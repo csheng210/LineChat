@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.pyc
+
+# 本機環境設定 (含 token 等敏感值), 不入库
+.env
+.env.local
+# 但範本檔要保留
+!.env.example

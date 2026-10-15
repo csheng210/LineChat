@@ -1,0 +1,25 @@
+# ---- 執行期資料/敏感資料, 一律不入库 ----
+Line-Data/
+chrome_profile/
+*.db
+
+# ---- 環境設定(含 token), 各子目錄已各自忽略; 這裡補一層網 ----
+.env
+.env.local
+*.env
+!.env.example
+
+# ---- 依賴/建置產物 ----
+node_modules/
+.venv/
+dist/
+dist-ssr/
+__pycache__/
+*.pyc
+
+# ---- 備份/日誌/OS ----
+*.bak
+*.bak2
+*.log
+Thumbs.db
+.DS_Store

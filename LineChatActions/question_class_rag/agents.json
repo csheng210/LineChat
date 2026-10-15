@@ -1,0 +1,4 @@
+{
+  "_comment": "agent 名稱 -> agent service URL 的註冊表。maps.json 的 agent 欄位若為名稱, chat_vllm_suggest.py 會到此解析成 URL。直接填 http(s):// URL 時不需要此檔。",
+  "room_agent": "http://127.0.0.1:8000/api/room/report"
+}
