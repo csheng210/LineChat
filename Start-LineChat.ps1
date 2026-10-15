@@ -1,4 +1,4 @@
-# Start-LineChat.ps1 - 啟動 LineChat: 後端 LineChatAPI(讀, uvicorn) -> 動作後端 LineChatActions(Node/Playwright, 送訊) -> 前端 LineChatWeb(vite)
+﻿# Start-LineChat.ps1 - 啟動 LineChat: 後端 LineChatAPI(讀, uvicorn) -> 動作後端 LineChatActions(Node/Playwright, 送訊) -> 前端 LineChatWeb(vite)
 # 啟動設定一律以各專案目錄下的 .env 為準(端口/資料目錄等); 命令列參數僅作為 .env 缺值時的備援覆寫。
 # 用法: 於 LineChat 目錄執行  .\Start-LineChat.ps1   或直接雙擊 Start-LineChat.cmd
 # 兩個服務各開一個獨立視窗顯示 log; 要關開直接關那個視窗即可。
@@ -172,3 +172,24 @@ if (Test-Port $actualWebPort) {
   Write-Host "前端 90 秒內未就緒, 請看 LineChatWeb 視窗訊息。" -ForegroundColor Red
   exit 1
 }
+
+# ---- 3) Kafka 觸發器 LineChatSync (Python 常駐, 無 HTTP port; 放最後啟動) ----
+#   訂閱 events-line-message -> 合併 -> 呼叫 LineChatActions /sync -> 完成發 events-line-synced。
+#   需 LineChatActions 已就緒(前面已啟動); 本服務無健康端點, 僅開視窗啟動, 不阻塞等待。
+$syncDir = Join-Path $root 'LineChatSync'
+$syncPy  = Join-Path $syncDir '.venv\Scripts\python.exe'
+$syncKafka = Join-Path $syncDir '.venv\Lib\site-packages\kafka'
+if (-not (Test-Path $syncPy)) {
+  Write-Host '未偵測到 LineChatSync venv, 跳過啟動。請先: cd LineChatSync; python -m venv .venv; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
+} elseif (-not (Test-Path $syncKafka)) {
+  Write-Host 'LineChatSync 尚未安裝依賴(kafka-python-ng), 跳過啟動。請先: cd LineChatSync; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
+} else {
+  Write-Host "啟動 LineChatSync (Kafka 觸發器)..." -ForegroundColor Cyan
+  Start-Process powershell -WorkingDirectory $syncDir -ArgumentList @(
+    '-NoExit', '-NoProfile', '-Command',
+    "`$host.UI.RawUI.WindowTitle='LineChatSync'; & '$syncPy' main.py"
+  ) | Out-Null
+  Write-Host "LineChatSync 已啟動(訂閱 events-line-message, 完成發 events-line-synced)" -ForegroundColor Green
+}
+
+
