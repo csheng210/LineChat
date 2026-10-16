@@ -313,15 +313,12 @@ function App() {
     }
     await loadFirstPage()
     await loadLatest()
-    // 同步後只重載聊天清單：右側回到未選取狀態（清除選取與聊天紀錄）
-    setSelected(null)
-    setDetail(null)
-    setDraft('')
-    setSendMsg(null)
-    clearAnalysis()
+    // 同步後重載聊天清單與聊天紀錄: 保留目前選取的對話, 用 detailNonce 觸發其內容重新載入
+    // (聊天紀錄的 useEffect 依賴 [selected, detailNonce], bump 後會重抓; 未選取時自動略過)
+    setDetailNonce((n) => n + 1)
   }
 
-  // 輪詢 events-line-synced: 收到新的同步完成 -> 更新最後同步時間並重載清單。
+  // 輪詢 events-line-synced(每 5 秒, 不需按同步按鈕也持續): 更新最後同步時間; 收到新的同步完成 -> 重載聊天清單與聊天紀錄。
   useEffect(() => {
     let alive = true
     const tick = async () => {
@@ -340,7 +337,7 @@ function App() {
           } else {
             setSyncTone('ok')
             setSyncStatusText('同步完成：' + fmtSyncSummary(msg))
-            // 首次載入只顯示時間, 不觸發重載; 之後每次新的同步完成才重載清單
+            // 首次載入只顯示時間, 不觸發重載; 之後每次新的同步完成才重載清單與聊天紀錄
             if (firstSyncedRef.current) firstSyncedRef.current = false
             else { setSyncing(false); await refreshAfterSync() }
           }
