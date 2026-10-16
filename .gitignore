@@ -2,6 +2,8 @@
 Line-Data/
 chrome_profile/
 *.db
+chat_media/
+output/
 
 # ---- 環境設定(含 token), 各子目錄已各自忽略; 這裡補一層網 ----
 .env
