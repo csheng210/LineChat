@@ -26,12 +26,14 @@ def _status() -> dict | None:
 def trigger_sync_once(
     days: int | None = None,
     include_unread: bool | None = None,
+    only_unread: bool | None = None,
     auto_window: bool | None = None,
 ) -> dict:
     deadline = time.monotonic() + config.SYNC_TRIGGER_TIMEOUT_MS / 1000.0
     body = {
         "days": config.SYNC_DAYS if days is None else days,
         "includeUnread": config.SYNC_INCLUDE_UNREAD if include_unread is None else include_unread,
+        "onlyUnread": config.SYNC_ONLY_UNREAD if only_unread is None else only_unread,
         "autoWindow": config.SYNC_AUTO_WINDOW if auto_window is None else auto_window,
     }
 

@@ -83,6 +83,7 @@ export const CONFIG = {
     .filter((a) => a in bnbs),
   SYNC_DAYS: int(process.env.ACTIONS_SYNC_DAYS, 2),
   SYNC_INCLUDE_UNREAD: process.env.ACTIONS_SYNC_INCLUDE_UNREAD !== '0',
+  SYNC_ONLY_UNREAD: process.env.ACTIONS_SYNC_ONLY_UNREAD === '1',
   SYNC_TIMEOUT_MS: int(process.env.ACTIONS_SYNC_TIMEOUT_MS, 1800000),
 
   IDLE_RELEASE_MS: int(process.env.ACTIONS_IDLE_MS, 600000),

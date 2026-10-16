@@ -4,14 +4,15 @@
 import { runSyncFlow } from './sync_flow.mjs';
 import { CONFIG } from './config.mjs';
 
-// opts: { ctx, accounts, days, includeUnread, autoWindow, datebelow, dryRun, onLog }
+// opts: { ctx, accounts, days, includeUnread, onlyUnread, autoWindow, datebelow, dryRun, onLog }
 export async function runSync(opts = {}) {
-  const { ctx, accounts, days, includeUnread, autoWindow, datebelow, dryRun, onLog } = opts;
+  const { ctx, accounts, days, includeUnread, onlyUnread, autoWindow, datebelow, dryRun, onLog } = opts;
   return runSyncFlow({
     ctx,
     accounts: accounts && accounts.length ? accounts : CONFIG.SYNC_ACCOUNTS,
     days: days ?? CONFIG.SYNC_DAYS,
     includeUnread: includeUnread ?? CONFIG.SYNC_INCLUDE_UNREAD,
+    onlyUnread: onlyUnread ?? CONFIG.SYNC_ONLY_UNREAD,
     autoWindow: autoWindow ?? true,
     datebelow: datebelow ?? '',
     dryRun: dryRun ?? false,

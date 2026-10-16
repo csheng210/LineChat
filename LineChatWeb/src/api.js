@@ -100,11 +100,11 @@ export async function getActionsStatus() {
 }
 
 // 同步聊天紀錄(長任務): 啟動後回 202, 由 getSyncStatus 輪詢進度。
-export async function startSync({ days, includeUnread, autoWindow } = {}) {
+export async function startSync({ days, includeUnread, onlyUnread, autoWindow } = {}) {
   const res = await fetch(ACTIONS + '/sync', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ days, includeUnread, autoWindow }),
+    body: JSON.stringify({ days, includeUnread, onlyUnread, autoWindow }),
   })
   const data = await res.json().catch(() => ({}))
   return { httpStatus: res.status, ok: !!(res.ok && (data.ok || data.started)), started: !!data.started, error: data.error }
@@ -144,12 +144,12 @@ export async function getLatest() {
 
 
 // 經 Kafka 觸發同步: 發布一則 events-line-sync(後端 /api/sync/trigger, 由 LineChatSync 消費觸發)。
-export async function triggerSyncKafka({ days, includeUnread, autoWindow } = {}) {
+export async function triggerSyncKafka({ days, includeUnread, onlyUnread, autoWindow } = {}) {
   try {
     const res = await fetch('/api/sync/trigger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ days, includeUnread, autoWindow }),
+      body: JSON.stringify({ days, includeUnread, onlyUnread, autoWindow }),
     })
     const data = await res.json().catch(() => ({}))
     return { httpStatus: res.status, ok: !!(res.ok && data.ok), topic: data.topic, requestedAt: data.requestedAt, error: data.error }

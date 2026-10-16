@@ -67,6 +67,33 @@
   cursor: default;
 }
 
+.sync-only-unread {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  background: #fff;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.sync-only-unread input {
+  accent-color: #06c755;
+  cursor: pointer;
+  margin: 0;
+}
+
+.sync-only-unread:has(input:disabled) {
+  color: #999;
+  background: #f2f2f2;
+  cursor: default;
+}
+
 .sync-status {
   font-size: 12px;
   color: #666;

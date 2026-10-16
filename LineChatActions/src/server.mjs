@@ -386,13 +386,14 @@ app.post('/sync', async (req, reply) => {
   const body = req.body || {};
   const days = Number.parseInt(body.days, 10) || CONFIG.SYNC_DAYS;
   const includeUnread = body.includeUnread === undefined ? CONFIG.SYNC_INCLUDE_UNREAD : !!body.includeUnread;
+  const onlyUnread = body.onlyUnread === undefined ? CONFIG.SYNC_ONLY_UNREAD : !!body.onlyUnread; // true=只同步未讀(跳過已讀備份)
   const autoWindow = body.autoWindow === undefined ? true : !!body.autoWindow; // true=從上次同步(增量高水位); false=固定回看 days
   const dryRun = !!body.dryRun;
   const accounts = Array.isArray(body.accounts) ? body.accounts.filter((a) => a in bnbs) : undefined;
 
   sync.running = true;
-  sync.last = { startedAt: Date.now(), finishedAt: null, error: null, killed: false, logTail: '', days, includeUnread, autoWindow, dryRun, summary: null };
-  console.log(`[sync] 排程: days=${days} includeUnread=${includeUnread} autoWindow=${autoWindow} dryRun=${dryRun}`);
+  sync.last = { startedAt: Date.now(), finishedAt: null, error: null, killed: false, logTail: '', days, includeUnread, onlyUnread, autoWindow, dryRun, summary: null };
+  console.log(`[sync] 排程: days=${days} includeUnread=${includeUnread} onlyUnread=${onlyUnread} autoWindow=${autoWindow} dryRun=${dryRun}`);
 
   enqueue(async () => {
     // dry-run 不需要瀏覽器; 其餘沿用同一長駐 Chrome(串行佇列與送訊互斥)。
@@ -416,6 +417,7 @@ app.post('/sync', async (req, reply) => {
           ctx,
           days,
           includeUnread,
+          onlyUnread,
           autoWindow,
           dryRun,
           accounts,
@@ -459,7 +461,7 @@ app.post('/sync', async (req, reply) => {
     }
   });
 
-  return reply.code(202).send({ ok: true, started: true, days, includeUnread, dryRun });
+  return reply.code(202).send({ ok: true, started: true, days, includeUnread, onlyUnread, dryRun });
 });
 app.get('/sync/status', async () => ({
   ok: true,

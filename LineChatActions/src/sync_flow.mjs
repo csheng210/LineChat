@@ -185,7 +185,7 @@ export function latestChatDate(chatDir) {
 
 export async function runSyncFlow(opts) {
   const {
-    ctx, accounts, days = 2, includeUnread = true, datebelow = '', root = process.cwd(),
+    ctx, accounts, days = 2, includeUnread = true, onlyUnread = false, datebelow = '', root = process.cwd(),
     chatDir, pyFill, python = 'python', cacheDb = '', prune = true, fillArgs = [],
     dryRun = false, manualTimeoutMs = 120000, fillTimeoutMs = 120000, vllmBaseUrl = '', onLog,
     dateline: datelineOpt = '', autoWindow = true,
@@ -221,38 +221,45 @@ export async function runSyncFlow(opts) {
 
   if (dryRun) {
     log('[同步] (dry-run) 僅列印計畫, 不驱动瀏覽器/不写檔/不回填。');
-    return { dryRun: true, accounts, days, includeUnread, dateline, includeEqual, refine, windowMode, changed: [], pruned: 0, fill: null };
+    return { dryRun: true, accounts, days, includeUnread, onlyUnread, dateline, includeEqual, refine, windowMode, changed: [], pruned: 0, fill: null };
   }
 
   fs.mkdirSync(chatDir, { recursive: true });
 
   // 1) 已讀房間: 逐帳號增量備份(排除未讀, 未讀交預覽處理避免被進入標已讀)
-  const beforeRead = snapshotDir(chatDir);
+  //    onlyUnread=true 時跳過此步, 只跑未讀預覽(「只同步未讀」)。
   const readFailures = [];
-  for (const account of accounts) {
-    log(`\n=== [已讀] ${account} ===`);
-    try {
-      const rs = await withAccountTimeout(backupChatHistoryByDateline(ctx, account, dateline, {
-        datebelow: datebelow || new Date(), includeUnread: false, outDir: chatDir, incremental: true, manualTimeoutMs, includeEqual, refine,
-      }), ACCOUNT_TIMEOUT_MS, '已讀備份');
-      for (const x of (Array.isArray(rs) ? rs : [])) {
-        if (x && x.error) { readFailures.push({ account, name: x.name, error: String(x.error).slice(0, 160) }); log(`  [備份失敗] ${account} / ${x.name}: ${x.error}`); }
+  let readChanged = [];
+  if (onlyUnread) {
+    log('[同步] 跳過已讀增量備份 (onlyUnread=true, 只同步未讀)。');
+  } else {
+    const beforeRead = snapshotDir(chatDir);
+    for (const account of accounts) {
+      log(`\n=== [已讀] ${account} ===`);
+      try {
+        const rs = await withAccountTimeout(backupChatHistoryByDateline(ctx, account, dateline, {
+          datebelow: datebelow || new Date(), includeUnread: false, outDir: chatDir, incremental: true, manualTimeoutMs, includeEqual, refine,
+        }), ACCOUNT_TIMEOUT_MS, '已讀備份');
+        for (const x of (Array.isArray(rs) ? rs : [])) {
+          if (x && x.error) { readFailures.push({ account, name: x.name, error: String(x.error).slice(0, 160) }); log(`  [備份失敗] ${account} / ${x.name}: ${x.error}`); }
+        }
+      } catch (e) {
+        log(`  [已讀] ${account} 失敗: ${e.message}`);
       }
-    } catch (e) {
-      log(`  [已讀] ${account} 失敗: ${e.message}`);
     }
+    log('[同步] 已讀備份全部完成, 開始 snapshot/對帳(逐檔翻 Unread=false)...');
+    const afterRead = snapshotDir(chatDir);
+    readChanged = Object.keys(afterRead).filter((f) => !(f in beforeRead) || afterRead[f] > beforeRead[f]).sort();
+    for (const f of readChanged) setUnreadField(path.join(chatDir, f), false);
+    log(`\n[已讀來源] 本次寫入 ${readChanged.length} 檔 (Unread=false)。`);
   }
-  log('[同步] 已讀備份全部完成, 開始 snapshot/對帳(逐檔翻 Unread=false)...');
-  const afterRead = snapshotDir(chatDir);
-  const readChanged = Object.keys(afterRead).filter((f) => !(f in beforeRead) || afterRead[f] > beforeRead[f]).sort();
-  for (const f of readChanged) setUnreadField(path.join(chatDir, f), false);
-  log(`\n[已讀來源] 本次寫入 ${readChanged.length} 檔 (Unread=false)。`);
 
   // 2) 未讀房間: 預覽抓取 -> 合併進同 {帳號,使用者} 既有紀錄 -> 寫新 endDate 檔(Unread=true)
   const unreadChanged = [];
   const clearedUnread = [];
-  log(`[同步] 已讀來源處理完畢, 準備進入未讀預覽 (includeUnread=${includeUnread})...`);
-  if (includeUnread) {
+  const doUnread = includeUnread || onlyUnread; // onlyUnread 必然要跑未讀預覽
+  log(`[同步] 已讀來源處理完畢, 準備進入未讀預覽 (includeUnread=${includeUnread}, onlyUnread=${onlyUnread})...`);
+  if (doUnread) {
     for (const account of accounts) {
       log(`\n=== [未讀預覽] ${account} ===`);
       let rooms = [];
@@ -370,5 +377,5 @@ export async function runSyncFlow(opts) {
 
   if (clearedUnread.length) log(`\n[未讀對帳] 清單已讀但本機仍標未讀: ${clearedUnread.length} 檔已翻回 Unread=false。`);
   log(`\n=== [同步完成] 已讀 ${readChanged.length} + 未讀 ${unreadChanged.length} 檔; 解除未讀 ${clearedUnread.length} 檔; 備份失敗 ${readFailures.length} 間; 刪除 ${pruned} 舊檔 ===`);
-  return { dryRun: false, accounts, days, includeUnread, dateline, includeEqual, refine, windowMode, changed, readChanged, unreadChanged, clearedUnread, readFailures, pruned, fill };
+  return { dryRun: false, accounts, days, includeUnread, onlyUnread, dateline, includeEqual, refine, windowMode, changed, readChanged, unreadChanged, clearedUnread, readFailures, pruned, fill };
 }

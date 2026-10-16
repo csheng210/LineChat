@@ -1,0 +1,14 @@
+{
+	"event": "LINEUSER_SENEED_MESSAGE",
+	"line_user": {
+		"id": "Ufd50053637c353620b984c0b96260ff5",
+		"name": "陳建聖",
+		"hotelname": "澎湖民宿藍海風晴"
+	},
+	"message": {
+		"content": "@echo",
+		"reply_token": "667a018c8761466a9aac76b23b54f1f0",
+		"send_time": "2026-10-01 13:14"
+	},
+	"timestamp": "2026-10-14 07:42"
+}

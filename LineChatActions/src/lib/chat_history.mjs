@@ -205,8 +205,28 @@ async function readMessagesDom(frame, sel, meta = {}) {
         }
       }
 
-      const cls = `${el.className || ''} ${el.querySelector('.chat-body')?.className || ''} ${main.className || ''}`;
-      const self = !!readText || SELF_CLASS_RE.test(cls);   // 傳送者(我方) vs 接受者(對方)
+      // 備援: 貼圖/圖片等訊息的「已讀/未讀」標記常不在 .chat-sub 直接 span,
+      // 改掃「氣泡內文(.chat-main)以外」的所有節點文字找標記(我方訊息才有, 對方訊息無)。
+      // 排除氣泡內文, 避免客人訊息內容剛好含「已讀」二字被誤判為我方。
+      if (!readText) {
+        for (const node of el.querySelectorAll('*')) {
+          if (main.contains(node)) continue;
+          const t = norm(node.textContent);
+          if (t && READ_RE.test(t)) { readText = t.match(READ_RE)[0]; break; }
+        }
+      }
+
+      // 我方/對方判定(主要): LINE 網頁用訊息列 .chat 上的「chat-reverse」class 標示我方訊息,
+      // 版面為 flex-direction: row-reverse。貼圖/圖片訊息常完全沒有「已讀/未讀」文字,
+      // 故以 chat-reverse class 與 row-reverse 版面為主要訊號, 已讀標記為輔。
+      const row = el.closest('.chat') || el.closest('li') || el.parentElement || el;
+      const cls = `${el.className || ''} ${row.className || ''} ${el.querySelector('.chat-body')?.className || ''} ${main.className || ''}`;
+      let selfLayout = false;
+      try {
+        const rcs = getComputedStyle(row);
+        if (rcs.flexDirection === 'row-reverse' || rcs.justifyContent === 'flex-end' || rcs.textAlign === 'right') selfLayout = true;
+      } catch (e) { /* 取樣失敗不影響 */ }
+      const self = /\bchat-reverse\b/.test(cls) || selfLayout || !!readText || SELF_CLASS_RE.test(cls);   // 傳送者(我方) vs 接受者(對方)
       // 是否已讀: 已讀=true, 未讀=false, 無標記(多半對方傳來)=null
       const read = readText ? READ_DONE_RE.test(readText) : null;
 
