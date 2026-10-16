@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from uPenghu_mgr.libs.envfile import load_env_file
 load_env_file()
 
-from lib import chat_lib, upenghu_lib
+from lib import chat_lib, kafka_lib, upenghu_lib
 
 app = FastAPI(title="LineChatAPI")
 
@@ -115,6 +115,25 @@ def companies_raw(req: CompanyRawRequest):
 @app.post("/api/room/report")
 def room_report(req: OrderReportRequest):
     return {"report": upenghu_lib.room_report(req.prompt, req.fallback)}
+
+
+# ---- 同步(經 Kafka): 觸發 events-line-sync / 讀取最後同步時間 ----
+@app.post("/api/sync/trigger")
+def sync_trigger(payload: dict = Body(default={})):
+    """發布一則觸發同步的訊息到 Kafka topic events-line-sync(由 LineChatSync 消費觸發)。"""
+    return kafka_lib.trigger_sync(payload)
+
+
+@app.get("/api/sync/latest")
+def sync_latest():
+    """回傳最近一次收到 Kafka topic events-line-synced 的訊息(含同步完成時間)。"""
+    return kafka_lib.get_latest_synced()
+
+
+@app.on_event("startup")
+def _kafka_startup():
+    """啟動背景執行緒持續消費 events-line-synced, 供 /api/sync/latest 讀取。"""
+    kafka_lib.start()
 
 
 if __name__ == "__main__":

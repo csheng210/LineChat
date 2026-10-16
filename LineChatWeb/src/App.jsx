@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import './App.css'
-import { analyzeAndSuggest, analyzeChat, appendChatMessage, getAnalysis, sendChatMessage, startSync, getSyncStatus, suggestReply, getLatest } from './api.js'
+import { analyzeAndSuggest, analyzeChat, appendChatMessage, getAnalysis, sendChatMessage, triggerSyncKafka, getSyncedLatest, suggestReply, getLatest } from './api.js'
 
 const MOBILE_MQ = '(max-width: 860px)' // <= 此寬度走行動版: 左右面板改為 overlay
 const isMobileViewport = () =>
@@ -31,6 +31,28 @@ function splitImageUrls(s) {
 function ts(m) {
   if (!m) return ''
   return [m.date, m.time].filter(Boolean).join(' ')
+}
+
+// ISO 時間字串 -> 'YYYY/MM/DD HH:MM:SS'(本地時區); 無法解析則原樣回傳。
+function fmtDateTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}/${pad(d.getMonth() + 1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+// events-line-synced 訊息 -> 一行同步摘要(沿用 Actions 的 summary 結構)。
+function fmtSyncSummary(msg) {
+  const sm = msg && msg.summary
+  let txt = sm ? `更新 ${sm.changed} 檔（已讀 ${sm.readChanged}／未讀 ${sm.unreadChanged}${sm.clearedUnread ? `，解除未讀 ${sm.clearedUnread}` : ''}，清理 ${sm.pruned}）` : '完成'
+  if (sm && sm.fill) {
+    txt += `，語意回填 ${sm.fill.ok} 成功`
+    if (sm.fill.fail) txt += `／${sm.fill.fail} 失敗`
+    if (sm.fill.skipped) txt += `／${sm.fill.skipped} 跳過(已回填)`
+  }
+  if (msg && msg.durationMs) txt += `（耗時 ${Math.round(msg.durationMs / 1000)}s）`
+  return txt
 }
 
 // 從分析的摘要表格抓「N. 分類」的編號, 組成分類清單(已結案時 classification 是空的)。
@@ -93,9 +115,12 @@ function App() {
   const [latest, setLatest] = useState(null) // chat_history 最近訊息日期/時間(同步按鈕旁顯示)
   const [syncStatusText, setSyncStatusText] = useState('')
   const [syncTone, setSyncTone] = useState('run')
+  const [lastSyncedAt, setLastSyncedAt] = useState('') // 最後同步完成時間(顯示用)
 
   const scrollRef = useRef(null)
   const reqRef = useRef(0)
+  const lastSyncedAtRef = useRef('') // 已套用的同步完成時間(去重)
+  const firstSyncedRef = useRef(true) // 首次載入只顯示時間, 不觸發重載
 
   // 斷點切換: 進入行動版把兩側面板收合, 回到桌面則張開
   useEffect(() => {
@@ -224,8 +249,11 @@ function App() {
       .then((r) => { if (alive) applySavedAnalysis(r) })
       .catch(() => {})
     fetch('/api/chats/' + encodeURIComponent(selected))
-      .then((res) => {
-        if (!res.ok) throw new Error('HTTP ' + res.status)
+      .then(async (res) => {
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}))
+          throw new Error(data.detail || 'HTTP ' + res.status)
+        }
         return res.json()
       })
       .then((d) => { if (alive) setDetail(d) })
@@ -293,59 +321,61 @@ function App() {
     clearAnalysis()
   }
 
-  function pollSync() {
-    const iv = setInterval(async () => {
-      const st = await getSyncStatus()
-      if (st && !st.running && st.last && st.last.finishedAt) {
-        clearInterval(iv)
-        setSyncing(false)
-        if (!st.last.error) {
-          await refreshAfterSync()
-          setSyncTone('ok')
-          const sm = st.last.summary
-          let txt = sm ? `同步完成：更新 ${sm.changed} 檔（已讀 ${sm.readChanged}／未讀 ${sm.unreadChanged}${sm.clearedUnread ? `，解除未讀 ${sm.clearedUnread}` : ''}，清理 ${sm.pruned}）` : '同步完成'
-          if (sm && sm.fill) {
-            txt += `，語意回填 ${sm.fill.ok} 成功`
-            if (sm.fill.fail) txt += `／${sm.fill.fail} 失敗`
-            if (sm.fill.skipped) txt += `／${sm.fill.skipped} 跳過(已回填)`
-          } else if (sm) {
-            txt += '，語意回填 未觸發'
+  // 輪詢 events-line-synced: 收到新的同步完成 -> 更新最後同步時間並重載清單。
+  useEffect(() => {
+    let alive = true
+    const tick = async () => {
+      const d = await getSyncedLatest()
+      if (!alive) return
+      if (d && d.ok && d.found && d.message) {
+        const msg = d.message
+        const at = msg.syncedAt || msg.finishedAt || d.receivedAt
+        if (at && at !== lastSyncedAtRef.current) {
+          lastSyncedAtRef.current = at
+          setLastSyncedAt(at)
+          if (msg.ok === false) {
+            setSyncing(false)
+            setSyncTone('err')
+            setSyncStatusText('同步未成功：' + (msg.error || '未知錯誤'))
+          } else {
+            setSyncTone('ok')
+            setSyncStatusText('同步完成：' + fmtSyncSummary(msg))
+            // 首次載入只顯示時間, 不觸發重載; 之後每次新的同步完成才重載清單
+            if (firstSyncedRef.current) firstSyncedRef.current = false
+            else { setSyncing(false); await refreshAfterSync() }
           }
-          if (sm && Array.isArray(sm.readFailures) && sm.readFailures.length) {
-            txt += `｜備份失敗 ${sm.readFailures.length} 間: ` + sm.readFailures.map((x) => `${x.name}(${x.error})`).join(' ; ')
-          }
-          if (sm && sm.fill && Array.isArray(sm.fill.failures) && sm.fill.failures.length) {
-            txt += `｜回填失敗明細: ` + sm.fill.failures.map((x) => `${x.file.replace(/\.json$/i, '')}(${x.reason})`).join(' ; ')
-          }
-          setSyncStatusText(txt)
-        } else {
-          setSyncTone('err')
-          setSyncStatusText('同步未成功：' + st.last.error)
         }
       }
-    }, 2000)
-  }
+    }
+    tick()
+    const iv = setInterval(tick, 5000)
+    return () => {
+      alive = false
+      clearInterval(iv)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function onSyncClick() {
     if (syncing) return
     setSyncing(true)
     setSyncTone('run')
-    setSyncStatusText('啟動同步…')
+    setSyncStatusText('已發送同步請求…')
     try {
       const opt = SYNC_RANGE_OPTIONS.find((o) => o.value === syncRange) || SYNC_RANGE_OPTIONS[2]
-      const s = await startSync({ days: opt.days, includeUnread: true, autoWindow: opt.autoWindow })
+      const s = await triggerSyncKafka({ days: opt.days, includeUnread: true, autoWindow: opt.autoWindow })
       if (!s.ok) {
         setSyncing(false)
         setSyncTone('err')
-        setSyncStatusText(s.error || ('同步啟動失敗 (HTTP ' + s.httpStatus + ')'))
+        setSyncStatusText(s.error || ('發送同步請求失敗 (HTTP ' + s.httpStatus + ')'))
         return
       }
       setSyncStatusText('同步進行中（會開啟 Chrome，依未讀/貼圖辨識可能需數分鐘）…')
-      pollSync()
+      // syncing 由上方輪詢收到 events-line-synced 後解除
     } catch (err) {
       setSyncing(false)
       setSyncTone('err')
-      setSyncStatusText('同步失敗：' + err.message)
+      setSyncStatusText('發送同步請求失敗：' + err.message)
     }
   }
 
@@ -597,6 +627,11 @@ function App() {
           <span className="latest-info" title="chat_history 中最近有訊息的日期與時間">
             最近：{latest.date}
             {(latest.time || latest.hhmm) ? ' ' + (latest.time || latest.hhmm) : ''}
+          </span>
+        )}
+        {lastSyncedAt && (
+          <span className="last-synced" title="最後一次同步完成時間（events-line-synced）">
+            最後同步：{fmtDateTime(lastSyncedAt)}
           </span>
         )}
         {syncStatusText && (

@@ -45,9 +45,13 @@ KAFKA_BROKERS = _brokers(os.environ.get("KAFKA_BROKERS", "remote.travel-penghu.c
 KAFKA_CLIENT_ID = os.environ.get("KAFKA_CLIENT_ID", "linechat-sync")
 KAFKA_GROUP_ID = os.environ.get("KAFKA_GROUP_ID", "linechat-sync")
 TOPIC_IN = os.environ.get("KAFKA_TOPIC_IN", "events-line-message")
+# 第二個「觸發同步」的 topic: 與 TOPIC_IN 共用同一套 SyncTopicHandler 處理邏輯。
+TOPIC_SYNC = os.environ.get("KAFKA_TOPIC_SYNC", "events-line-sync")
 TOPIC_OUT = os.environ.get("KAFKA_TOPIC_OUT", "events-line-synced")
 KAFKA_CONNECT_TIMEOUT_MS = _int("KAFKA_CONNECT_TIMEOUT_MS", 15000)
 KAFKA_REQUEST_TIMEOUT_MS = _int("KAFKA_REQUEST_TIMEOUT_MS", 30000)
+# mainloop 每輪 consumer.poll 的逾時(毫秒): 決定主迴圈空轉間隔與 flush_due 檢查頻率。
+KAFKA_POLL_TIMEOUT_MS = _int("KAFKA_POLL_TIMEOUT_MS", 1000)
 KAFKA_SSL = _bool("KAFKA_SSL", False)
 KAFKA_SASL_MECHANISM = (os.environ.get("KAFKA_SASL_MECHANISM") or "plain").lower()
 KAFKA_SASL_USERNAME = os.environ.get("KAFKA_SASL_USERNAME") or None

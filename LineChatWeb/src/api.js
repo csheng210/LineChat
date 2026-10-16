@@ -141,3 +141,30 @@ export async function getLatest() {
     return null
   }
 }
+
+
+// 經 Kafka 觸發同步: 發布一則 events-line-sync(後端 /api/sync/trigger, 由 LineChatSync 消費觸發)。
+export async function triggerSyncKafka({ days, includeUnread, autoWindow } = {}) {
+  try {
+    const res = await fetch('/api/sync/trigger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ days, includeUnread, autoWindow }),
+    })
+    const data = await res.json().catch(() => ({}))
+    return { httpStatus: res.status, ok: !!(res.ok && data.ok), topic: data.topic, requestedAt: data.requestedAt, error: data.error }
+  } catch (err) {
+    return { httpStatus: 0, ok: false, error: err.message }
+  }
+}
+
+// 讀取最後一次同步完成(topic events-line-synced): { ok, found, receivedAt, message }。
+export async function getSyncedLatest() {
+  try {
+    const res = await fetch('/api/sync/latest')
+    if (!res.ok) return null
+    return await res.json()
+  } catch {
+    return null
+  }
+}

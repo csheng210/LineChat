@@ -67,9 +67,21 @@ _WRITE_LOCK = threading.Lock()
 
 def _chat_path(file_name: str) -> Path:
     """解析並驗證 chat_history 目錄下的 .json 檔名, 防範路徑穿越; 不存在則 404。"""
-    if "/" in file_name or "\\" in file_name or ".." in file_name or not file_name.endswith(".json"):
+    # 只允許「單一檔名」: 不得為空、不得是 . / ..、不得含目錄分隔符。
+    # (舊版用 ".." in file_name 的子字串檢查, 會把人名結尾帶句點的合法檔名
+    #  例如「怡怡..json」誤判為非法; 改以分隔符 + 解析後落點雙重把關。)
+    if not file_name or file_name in (".", ".."):
+        raise HTTPException(status_code=400, detail="非法的檔名")
+    if "/" in file_name or "\\" in file_name:
+        raise HTTPException(status_code=400, detail="非法的檔名")
+    if not file_name.endswith(".json"):
         raise HTTPException(status_code=400, detail="非法的檔名")
     path = CHAT_HISTORY_DIR / file_name
+    # 雙重保險: 解析後必須仍落在 CHAT_HISTORY_DIR 直下, 防任何路徑穿越。
+    try:
+        path.resolve().relative_to(CHAT_HISTORY_DIR.resolve())
+    except (ValueError, OSError):
+        raise HTTPException(status_code=400, detail="非法的檔名")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"找不到聊天紀錄: {file_name}")
     return path

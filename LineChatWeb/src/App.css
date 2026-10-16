@@ -95,6 +95,13 @@
   margin-left: 4px;
 }
 
+.last-synced {
+  font-size: 12px;
+  color: #2a6fb0;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
 .app {
   flex: 1;
   min-height: 0;
