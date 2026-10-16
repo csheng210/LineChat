@@ -335,19 +335,30 @@ function App() {
       firstSyncedRef.current = false
       if (d && d.ok && d.found && d.message) {
         const msg = d.message
-        const at = msg.syncedAt || msg.finishedAt || d.receivedAt
+        const topic = d.topic || ''
+        // events-line-sync 是「同步請求」(帶 requestedAt); events-line-synced /
+        // events-line-message-recevied 是「同步完成」(帶 syncedAt/finishedAt)。
+        const at = msg.syncedAt || msg.finishedAt || msg.requestedAt || d.receivedAt
         if (at && at !== lastSyncedAtRef.current) {
           lastSyncedAtRef.current = at
           setLastSyncedAt(at)
-          if (msg.ok === false) {
+          if (topic === 'events-line-sync') {
+            // 收到同步請求: 標記進行中, 同時更新聊天清單與最後同步時間
+            setSyncing(true)
+            setSyncTone('run')
+            setSyncStatusText('同步進行中（會開啟 Chrome，依未讀/貼圖辨識可能需數分鐘）…')
+            if (!isFirst) { await refreshAfterSync() }
+          } else if (msg.ok === false) {
             setSyncing(false)
             setSyncTone('err')
             setSyncStatusText('同步未成功：' + (msg.error || '未知錯誤'))
+            if (!isFirst) { await refreshAfterSync() }
           } else {
+            setSyncing(false)
             setSyncTone('ok')
             setSyncStatusText('同步完成：' + fmtSyncSummary(msg))
             // 載入時已存在的同步只顯示; 之後任何新的同步完成 -> 重載清單與聊天紀錄
-            if (!isFirst) { setSyncing(false); await refreshAfterSync() }
+            if (!isFirst) { await refreshAfterSync() }
           }
         }
       }
@@ -644,7 +655,7 @@ function App() {
           </span>
         )}
         {lastSyncedAt && (
-          <span className="last-synced" title="最後一次同步完成時間（events-line-synced）">
+          <span className="last-synced" title="最後同步時間（events-line-sync / events-line-message-recevied / events-line-synced）">
             最後同步：{fmtDateTime(lastSyncedAt)}
           </span>
         )}

@@ -33,6 +33,9 @@ CLIENT_ID = os.environ.get("KAFKA_CLIENT_ID", "linechat-api")
 GROUP_ID = os.environ.get("KAFKA_GROUP_ID_SYNCED", "linechat-api-synced")
 TOPIC_SYNC = os.environ.get("KAFKA_TOPIC_SYNC", "events-line-sync")
 TOPIC_SYNCED = os.environ.get("KAFKA_TOPIC_SYNCED", "events-line-synced")
+TOPIC_MESSAGE_OUT = os.environ.get("KAFKA_TOPIC_MESSAGE_OUT", "events-line-message-recevied")
+# 前端要監聽、收到即更新聊天清單與最後同步時間的 topic 清單。
+WATCH_TOPICS = [TOPIC_SYNCED, TOPIC_SYNC, TOPIC_MESSAGE_OUT]
 CONNECT_TIMEOUT_MS = int(os.environ.get("KAFKA_CONNECT_TIMEOUT_MS", "15000"))
 REQUEST_TIMEOUT_MS = int(os.environ.get("KAFKA_REQUEST_TIMEOUT_MS", "30000"))
 KAFKA_SSL = (os.environ.get("KAFKA_SSL", "") or "").strip().lower() not in ("", "0", "false", "no")
@@ -111,7 +114,7 @@ def _consume_loop() -> None:
     try:
         from kafka import KafkaConsumer
         consumer = KafkaConsumer(
-            TOPIC_SYNCED,
+            *WATCH_TOPICS,
             group_id=GROUP_ID,
             client_id=CLIENT_ID,
             enable_auto_commit=True,
@@ -137,7 +140,7 @@ def _consume_loop() -> None:
                     val = {"raw": m.value.decode("utf-8", "replace")}
                 received_at = datetime.now().astimezone().isoformat(timespec="seconds")
                 with _latest_lock:
-                    _latest = {"receivedAt": received_at, "message": val}
+                    _latest = {"receivedAt": received_at, "topic": m.topic, "message": val}
 
 
 def start() -> None:
@@ -160,4 +163,10 @@ def get_latest_synced() -> dict:
     with _latest_lock:
         if _latest is None:
             return {"ok": True, "found": False}
-        return {"ok": True, "found": True, "receivedAt": _latest["receivedAt"], "message": _latest["message"]}
+        return {
+            "ok": True,
+            "found": True,
+            "receivedAt": _latest["receivedAt"],
+            "topic": _latest.get("topic"),
+            "message": _latest["message"],
+        }
