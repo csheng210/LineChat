@@ -120,7 +120,7 @@ def room_report(req: OrderReportRequest):
 # ---- 同步(經 Kafka): 觸發 events-line-sync / 讀取最後同步時間 ----
 @app.post("/api/sync/trigger")
 def sync_trigger(payload: dict = Body(default={})):
-    """發布一則觸發同步的訊息到 Kafka topic events-line-sync(由 LineChatSync 消費觸發)。"""
+    """發布一則觸發同步的訊息到 Kafka topic events-line-sync(由 LineChatEventHandle 消費觸發)。"""
     return kafka_lib.trigger_sync(payload)
 
 

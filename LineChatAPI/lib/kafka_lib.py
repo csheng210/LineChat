@@ -1,7 +1,7 @@
 """kafka_lib.py -- 經 Kafka 觸發同步 / 讀取最後同步時間.
 
 前端不直接連 Kafka, 一律經本模組:
-  - trigger_sync(payload): 發布一則訊息到 topic events-line-sync (由 LineChatSync 消費並觸發同步)
+  - trigger_sync(payload): 發布一則訊息到 topic events-line-sync (由 LineChatEventHandle 消費並觸發同步)
   - get_latest_synced():   回傳最近一次收到 topic events-line-synced 的訊息(含同步完成時間)
 
 背景執行緒持續消費 events-line-synced, 把最新一則留在記憶體(帶鎖保護)。
@@ -18,7 +18,7 @@ import threading
 import time
 from datetime import datetime
 
-# ---- 設定(與 LineChatSync 同名, 共用同一套 Kafka) ----
+# ---- 設定(與 LineChatEventHandle 同名, 共用同一套 Kafka) ----
 def _brokers(raw: str) -> list[str]:
     out: list[str] = []
     for item in (raw or "localhost:9092").split(","):

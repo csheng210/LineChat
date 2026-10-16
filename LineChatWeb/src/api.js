@@ -143,7 +143,7 @@ export async function getLatest() {
 }
 
 
-// 經 Kafka 觸發同步: 發布一則 events-line-sync(後端 /api/sync/trigger, 由 LineChatSync 消費觸發)。
+// 經 Kafka 觸發同步: 發布一則 events-line-sync(後端 /api/sync/trigger, 由 LineChatEventHandle 消費觸發)。
 export async function triggerSyncKafka({ days, includeUnread, onlyUnread, autoWindow } = {}) {
   try {
     const res = await fetch('/api/sync/trigger', {

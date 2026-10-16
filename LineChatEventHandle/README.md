@@ -1,4 +1,4 @@
-# LineChatSync
+# LineChatEventHandle
 
 Kafka 觸發器: 訂閱 Kafka topic `events-line-message`, 收到訊息後在合併窗口內把同 topic 的
 後續訊息合併, **只觸發一次** LineChatActions 的同步(`runSyncFlow`); 完成後發布到
@@ -9,7 +9,7 @@ Kafka 觸發器: 訂閱 Kafka topic `events-line-message`, 收到訊息後在合
 
 ## 設定
 
-設定一律讀 `LineChatSync/.env`(見 `.env.example`)。關鍵項目:
+設定一律讀 `LineChatEventHandle/.env`(見 `.env.example`)。關鍵項目:
 
 - `KAFKA_BROKERS` = `remote.travel-penghu.com.tw:29092`
 - `KAFKA_TOPIC_IN` = `events-line-message`, `KAFKA_TOPIC_OUT` = `events-line-synced`
@@ -20,7 +20,7 @@ Kafka 觸發器: 訂閱 Kafka topic `events-line-message`, 收到訊息後在合
 ## 執行
 
 ```powershell
-cd LineChatSync
+cd LineChatEventHandle
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 .venv\Scripts\python.exe main.py
@@ -32,7 +32,7 @@ python -m venv .venv
 
 ```json
 {
-  "source": "LineChatSync",
+  "source": "LineChatEventHandle",
   "ok": true,
   "syncedAt": "2026-10-15T12:34:56+08:00",
   "startedAt": "...", "finishedAt": "...",

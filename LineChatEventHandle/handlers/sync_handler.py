@@ -133,7 +133,7 @@ class SyncTriggerHandler(TopicHandler):
         except Exception as e:
             now_ms = int(time.time() * 1000)
             self._publish({
-                "source": "LineChatSync",
+                "source": "LineChatEventHandle",
                 "topics": topics,
                 "ok": False,
                 "syncedAt": _iso(now_ms),
@@ -142,7 +142,7 @@ class SyncTriggerHandler(TopicHandler):
             })
             return
         self._publish({
-            "source": "LineChatSync",
+            "source": "LineChatEventHandle",
             "topics": topics,
             "ok": True,
             "syncedAt": _iso(r["finished_at"]),          # 同步完成時間

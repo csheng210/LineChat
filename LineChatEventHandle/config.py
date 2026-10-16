@@ -1,4 +1,4 @@
-"""config.py - 集中讀取 LineChatSync/.env 與預設值。
+"""config.py - 集中讀取 LineChatEventHandle/.env 與預設值。
 
 以 python-dotenv 載入 .env(不覆蓋已存在的真實環境變數), 其餘一律讀 os.environ。
 """
@@ -10,7 +10,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 REPO = Path(__file__).resolve().parent
-# 載入 LineChatSync/.env(若存在); override=False -> 真實環境優先。
+# 載入 LineChatEventHandle/.env(若存在); override=False -> 真實環境優先。
 load_dotenv(REPO / ".env", override=False)
 
 
@@ -63,10 +63,10 @@ KAFKA_SASL_PASSWORD = os.environ.get("KAFKA_SASL_PASSWORD") or ""
 ACTIONS_BASE_URL = (os.environ.get("ACTIONS_BASE_URL", "http://127.0.0.1:8202")).rstrip("/")
 
 # ---- 資料目錄(與 LineChatActions 共用同一份 Line-Data) ----
-# 預設: LineChatSync 同層的 Line-Data; 可用 LINE_CHAT_DATA_DIR 覆蓋。
+# 預設: LineChatEventHandle 同層的 Line-Data; 可用 LINE_CHAT_DATA_DIR 覆蓋。
 _data_raw = os.environ.get("LINE_CHAT_DATA_DIR")
 _data_path = Path(_data_raw) if _data_raw else (REPO.parent / "Line-Data")
-# 相對路徑一律對 LineChatSync 目錄(REPO)解析, 避免依賴執行時 CWD。
+# 相對路徑一律對 LineChatEventHandle 目錄(REPO)解析, 避免依賴執行時 CWD。
 DATA_DIR = _data_path if _data_path.is_absolute() else (REPO / _data_path).resolve()
 # 收到 events-line-message 時, 先把該訊息寫入此目錄(檔名與 chat_history 一致)。
 CHAT_LINE_MESSAGE_UNREAD_DIR = Path(

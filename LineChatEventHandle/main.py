@@ -1,4 +1,4 @@
-"""main.py - LineChatSync 主程式(主迴圈)。
+"""main.py - LineChatEventHandle 主程式(主迴圈)。
 
 職責(與各 topic 的處理邏輯解耦):
   1) 依 handlers 註冊表建立所有 topic 處理程式, 並訂閱它們負責的所有 topic

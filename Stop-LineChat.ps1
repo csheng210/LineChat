@@ -1,9 +1,9 @@
 ﻿# Stop-LineChat.ps1 - 停止 Start-LineChat.ps1 啟動的所有服務並關閉其終端視窗:
-#   LineChatAPI(uvicorn) / LineChatActions(node) / LineChatWeb(vite) / LineChatSync(python 常駐)。
+#   LineChatAPI(uvicorn) / LineChatActions(node) / LineChatWeb(vite) / LineChatEventHandle(python 常駐)。
 # 用法: 於 LineChat 目錄執行  .\Stop-LineChat.ps1   或雙擊 Stop-LineChat.cmd
 # 清理策略(多重兜底, 一併關閉承載服務的終端視窗):
 #   (1) 依視窗標題(開頭 LineChat)殺整棵程序樹  (2) 依命令行殺承載服務的 cmd/powershell 終端
-#   (3) 依監聽端口殺 owning 程序樹            (4) 依命令行殺 LineChatSync(python, 無 port)
+#   (3) 依監聽端口殺 owning 程序樹            (4) 依命令行殺 LineChatEventHandle(python, 無 port)
 param(
   [int]$ApiPort = 0,
   [int]$ActionsPort = 0,
@@ -14,7 +14,7 @@ $root       = $PSScriptRoot
 $apiDir     = Join-Path $root 'LineChatAPI'
 $webDir     = Join-Path $root 'LineChatWeb'
 $actionsDir = Join-Path $root 'LineChatActions'
-$syncDir    = Join-Path $root 'LineChatSync'
+$syncDir    = Join-Path $root 'LineChatEventHandle'
 
 # 從 .env 讀 key(忽略註解/export/引號)
 function Get-EnvValue([string]$path, [string]$key) {
@@ -72,7 +72,7 @@ try {
     Where-Object {
       $_.CommandLine -and (
         $_.CommandLine -like '*LineChatAPI*' -or $_.CommandLine -like '*LineChatActions*' -or
-        $_.CommandLine -like '*LineChatWeb*' -or $_.CommandLine -like '*LineChatSync*'
+        $_.CommandLine -like '*LineChatWeb*' -or $_.CommandLine -like '*LineChatEventHandle*'
       )
     }
   foreach ($h in $hosts) { Kill-Once ([int]$h.ProcessId) '命令行=服務終端' }
@@ -86,11 +86,11 @@ foreach ($port in @($ApiPort, $ActionsPort, $WebPort)) {
   } catch { }
 }
 
-# (4) 依命令行殺 LineChatSync(無 port, 靠命令行比對 python main.py)
+# (4) 依命令行殺 LineChatEventHandle(無 port, 靠命令行比對 python main.py)
 try {
   $procs = Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='pythonw.exe'" -ErrorAction Stop |
-    Where-Object { $_.CommandLine -and $_.CommandLine -like "*LineChatSync*main.py*" }
-  foreach ($p in $procs) { Kill-Once ([int]$p.ProcessId) 'LineChatSync' }
+    Where-Object { $_.CommandLine -and $_.CommandLine -like "*LineChatEventHandle*main.py*" }
+  foreach ($p in $procs) { Kill-Once ([int]$p.ProcessId) 'LineChatEventHandle' }
 } catch { }
 
 # 收尾: 確認端口已釋放

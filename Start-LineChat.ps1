@@ -173,23 +173,23 @@ if (Test-Port $actualWebPort) {
   exit 1
 }
 
-# ---- 3) Kafka 觸發器 LineChatSync (Python 常駐, 無 HTTP port; 放最後啟動) ----
+# ---- 3) Kafka 觸發器 LineChatEventHandle (Python 常駐, 無 HTTP port; 放最後啟動) ----
 #   訂閱 events-line-message -> 合併 -> 呼叫 LineChatActions /sync -> 完成發 events-line-synced。
 #   需 LineChatActions 已就緒(前面已啟動); 本服務無健康端點, 僅開視窗啟動, 不阻塞等待。
-$syncDir = Join-Path $root 'LineChatSync'
+$syncDir = Join-Path $root 'LineChatEventHandle'
 $syncPy  = Join-Path $syncDir '.venv\Scripts\python.exe'
 $syncKafka = Join-Path $syncDir '.venv\Lib\site-packages\kafka'
 if (-not (Test-Path $syncPy)) {
-  Write-Host '未偵測到 LineChatSync venv, 跳過啟動。請先: cd LineChatSync; python -m venv .venv; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
+  Write-Host '未偵測到 LineChatEventHandle venv, 跳過啟動。請先: cd LineChatEventHandle; python -m venv .venv; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
 } elseif (-not (Test-Path $syncKafka)) {
-  Write-Host 'LineChatSync 尚未安裝依賴(kafka-python-ng), 跳過啟動。請先: cd LineChatSync; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
+  Write-Host 'LineChatEventHandle 尚未安裝依賴(kafka-python-ng), 跳過啟動。請先: cd LineChatEventHandle; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
 } else {
-  Write-Host "啟動 LineChatSync (Kafka 觸發器)..." -ForegroundColor Cyan
+  Write-Host "啟動 LineChatEventHandle (Kafka 觸發器)..." -ForegroundColor Cyan
   Start-Process powershell -WorkingDirectory $syncDir -ArgumentList @(
     '-NoExit', '-NoProfile', '-Command',
-    "`$host.UI.RawUI.WindowTitle='LineChatSync'; & '$syncPy' main.py"
+    "`$host.UI.RawUI.WindowTitle='LineChatEventHandle'; & '$syncPy' main.py"
   ) | Out-Null
-  Write-Host "LineChatSync 已啟動(訂閱 events-line-message, 完成發 events-line-synced)" -ForegroundColor Green
+  Write-Host "LineChatEventHandle 已啟動(訂閱 events-line-message, 完成發 events-line-synced)" -ForegroundColor Green
 }
 
 
