@@ -120,7 +120,11 @@ function App() {
   const scrollRef = useRef(null)
   const reqRef = useRef(0)
   const lastSyncedAtRef = useRef('') // 已套用的同步完成時間(去重)
-  const firstSyncedRef = useRef(true) // 首次載入只顯示時間, 不觸發重載
+  const firstSyncedRef = useRef(true) // 僅第一次 tick 視為「載入時已存在的同步」(只顯示不重載)
+  const accountRef = useRef(account) // 供輪詢閉包讀取「目前」帳號過濾(避免捕獲初始值)
+  const queryRef = useRef(query) // 供輪詢閉包讀取「目前」搜尋字(避免捕獲初始值)
+  accountRef.current = account
+  queryRef.current = query
 
   // 斷點切換: 進入行動版把兩側面板收合, 回到桌面則張開
   useEffect(() => {
@@ -164,8 +168,9 @@ function App() {
 
   function buildUrl(off) {
     const p = new URLSearchParams()
-    if (account) p.set('account', account)
-    if (query) p.set('q', query)
+    // 用 ref 讀取, 讓輪詢閉包(捕獲首次渲染)也能拿到「目前」過濾條件, 重載時不遺失帳號/搜尋。
+    if (accountRef.current) p.set('account', accountRef.current)
+    if (queryRef.current) p.set('q', queryRef.current)
     p.set('limit', String(PAGE_SIZE))
     p.set('offset', String(off))
     return '/api/chats?' + p.toString()
@@ -324,6 +329,9 @@ function App() {
     const tick = async () => {
       const d = await getSyncedLatest()
       if (!alive) return
+      // 只有「第一次 tick」視為載入時已存在的同步(只顯示時間, 不重載); 之後一律算新同步。
+      const isFirst = firstSyncedRef.current
+      firstSyncedRef.current = false
       if (d && d.ok && d.found && d.message) {
         const msg = d.message
         const at = msg.syncedAt || msg.finishedAt || d.receivedAt
@@ -337,9 +345,8 @@ function App() {
           } else {
             setSyncTone('ok')
             setSyncStatusText('同步完成：' + fmtSyncSummary(msg))
-            // 首次載入只顯示時間, 不觸發重載; 之後每次新的同步完成才重載清單與聊天紀錄
-            if (firstSyncedRef.current) firstSyncedRef.current = false
-            else { setSyncing(false); await refreshAfterSync() }
+            // 載入時已存在的同步只顯示; 之後任何新的同步完成 -> 重載清單與聊天紀錄
+            if (!isFirst) { setSyncing(false); await refreshAfterSync() }
           }
         }
       }
