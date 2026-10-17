@@ -1,0 +1,187 @@
+.auth-center {
+  height: 100%;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f2f2f2;
+  padding: 24px;
+}
+
+.auth-spinner {
+  width: 36px;
+  height: 36px;
+  border: 3px solid #d0d0d0;
+  border-top-color: #06c755;
+  border-radius: 50%;
+  animation: auth-spin 0.8s linear infinite;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 授權後外框: 直排填滿視窗, status bar 佔自身高度, 主內容吃剩餘高度 */
+.auth-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.auth-content {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 頂端 status bar: 左=品牌, 右=帳號圖示 */
+.auth-statusbar {
+  flex: none;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 14px;
+  background: #fff;
+  border-bottom: 1px solid #e6e6e6;
+}
+
+.auth-brand {
+  font-size: 16px;
+  font-weight: 700;
+  color: #06c755;
+}
+
+.auth-account {
+  position: relative;
+}
+
+.auth-account-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: #666;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.auth-account-btn:hover {
+  color: #06c755;
+  border-color: #06c755;
+}
+
+.auth-account-btn.on {
+  color: #06c755;
+  border-color: #06c755;
+}
+
+/* 圖示展開的 popover */
+.auth-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10000;
+  width: 240px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.12);
+}
+
+.auth-popover-status {
+  font-size: 13px;
+  color: #555;
+  margin-bottom: 10px;
+  text-align: center;
+}
+
+.auth-popover-status strong {
+  color: #222;
+}
+
+.auth-popover-btn {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #06c755;
+  background: #fff;
+  border: 1px solid #06c755;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.auth-popover-btn:hover {
+  background: #06c755;
+  color: #fff;
+}
+
+/* popover 內登入表單 */
+.auth-login {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.auth-input {
+  width: 100%;
+  padding: 9px 11px;
+  font-size: 14px;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  background: #fff;
+  color: #222;
+}
+
+.auth-input:focus {
+  outline: none;
+  border-color: #06c755;
+}
+
+.auth-error {
+  color: #d93025;
+  font-size: 12px;
+  text-align: center;
+}
+
+.auth-submit {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  background: #06c755;
+  border: 1px solid #06c755;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.auth-submit:hover:not(:disabled) {
+  background: #05a244;
+  border-color: #05a244;
+}
+
+.auth-submit:disabled {
+  background: #b9e6cb;
+  border-color: #b9e6cb;
+  cursor: not-allowed;
+}
+
+/* 未登入時主內容區提示 */
+.auth-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.auth-placeholder-text {
+  font-size: 14px;
+  color: #888;
+}

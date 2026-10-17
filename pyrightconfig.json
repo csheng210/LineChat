@@ -1,0 +1,6 @@
+{
+  "extraPaths": [
+    "LineChatActions/src/py",
+    "LineChatEventHandle"
+  ]
+}

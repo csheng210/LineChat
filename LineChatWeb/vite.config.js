@@ -1,4 +1,5 @@
 import react from '@vitejs/plugin-react'
+import { authPlugin } from './auth-plugin.js'
 import { defineConfig, loadEnv } from 'vite'
 
 // https://vite.dev/config/
@@ -12,7 +13,7 @@ export default defineConfig(({ mode }) => {
   const allowedHosts = allowedHostsRaw === 'true' ? true : allowedHostsRaw ? allowedHostsRaw.split(',').map((h) => h.trim()).filter(Boolean) : undefined
 
   return {
-    plugins: [react()],
+    plugins: [react(), authPlugin()],
     server: {
       // dev server 監聽位址由 .env 讀取(VITE_DEV_HOST / VITE_DEV_PORT), 未設則用 Vite 預設
       host: env.VITE_DEV_HOST || "127.0.0.1",
@@ -45,3 +46,4 @@ export default defineConfig(({ mode }) => {
     },
   }
 })
+

@@ -114,7 +114,7 @@ function App() {
   const [picked, setPicked] = useState([]) // 依點選順序最多兩則: { index, date, time }
   const [syncing, setSyncing] = useState(false)
   const [syncRange, setSyncRange] = useState(SYNC_RANGE_DEFAULT) // 同步範圍(天數/從上次同步)
-  const [syncOnlyUnread, setSyncOnlyUnread] = useState(false) // 只同步未讀(跳過已讀備份)
+  const [syncOnlyUnread] = useState(false) // 只同步未讀(跳過已讀備份)
   const [latest, setLatest] = useState(null) // chat_history 最近訊息日期/時間(同步按鈕旁顯示)
   const [syncStatusText, setSyncStatusText] = useState('')
   const [syncTone, setSyncTone] = useState('run')
@@ -663,7 +663,6 @@ function App() {
         >
           清單
         </button>
-        <h1 className="brand">LINE 聊天紀錄</h1>
         <select
           className="sync-days"
           value={syncRange}
@@ -675,15 +674,6 @@ function App() {
             <option key={o.value} value={o.value}>{o.label}</option>
           ))}
         </select>
-        <label className="sync-only-unread" title="只同步未讀聊天紀錄(跳過已讀增量備份)">
-          <input
-            type="checkbox"
-            checked={syncOnlyUnread}
-            onChange={(e) => setSyncOnlyUnread(e.target.checked)}
-            disabled={syncing}
-          />
-          只同步未讀
-        </label>
         <button
           className="sync-btn"
           disabled={syncing}
@@ -1287,3 +1277,6 @@ function AnalysisView({ data }) {
 }
 
 export default App
+
+
+
