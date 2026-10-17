@@ -1,6 +1,6 @@
 // sendFlow.mjs - 送訊編排(用 chat_nav 進入聊天室 + chat_send_message 打輸入框點傳送)。
 //   context 由服務端注入(長駐單一 Chrome), 不自行 launch/close。
-import { enterRoom } from './chat_nav.mjs';
+import { enterRoom, leaveRoom } from './chat_nav.mjs';
 import { sendMessage } from './lib/chat_send_message.mjs';
 
 export async function sendUserMessage(ctx, accountName, userName, message, opts = {}) {
@@ -9,5 +9,8 @@ export async function sendUserMessage(ctx, accountName, userName, message, opts 
   await enterRoom(ctx, accountName, userName, opts);
   const sent = await sendMessage(ctx, message);
   console.log(sent ? '訊息已傳送。' : '訊息傳送未成功, 請看 reply_fail.png。');
+  // 送訊後離開聊天室(回到清單根): 避免該房間保持「開啟/活躍」把客人後續訊息自動標已讀,
+  //   導致之後「只同步未讀」抓不到新訊息。
+  await leaveRoom(ctx, accountName, opts).catch((e) => console.log('離開聊天室失敗(忽略):', (e && e.message) || e));
   return sent;
 }

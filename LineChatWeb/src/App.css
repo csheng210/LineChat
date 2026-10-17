@@ -548,6 +548,43 @@
   color: #333;
 }
 
+.analysis-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.analysis-nav-btn {
+  width: 24px;
+  height: 24px;
+  line-height: 1;
+  border: 1px solid #d7d7d7;
+  background: #fff;
+  color: #444;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.analysis-nav-btn:hover:not(:disabled) {
+  border-color: #06c755;
+  color: #06c755;
+}
+
+.analysis-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.analysis-nav-count {
+  font-size: 12px;
+  color: #666;
+  min-width: 34px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
 .analysis-collapse {
   flex: none;
   width: 26px;

@@ -34,5 +34,14 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    preview: {
+      host: env.VITE_DEV_HOST || "127.0.0.1",
+      port: Number(env.VITE_PREVIEW_PORT) || 8203,
+      ...(allowedHosts ? { allowedHosts } : {}),
+      proxy: {
+        '/api': { target: apiTarget, changeOrigin: true },
+        '/actions': { target: actionsTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/actions/, '') },
+      },
+    },
   }
 })

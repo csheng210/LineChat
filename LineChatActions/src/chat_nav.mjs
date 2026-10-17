@@ -51,6 +51,20 @@ export async function enterRoom(ctx, accountName, userName = '', opts = {}) {
   return chatPage;
 }
 
+// 離開聊天室(回到帳號聊天清單根, 不選取任何聊天室)。
+//   送訊後若讓房間保持「開啟/活躍」, 客人後續傳來的訊息會被 chat.line.biz 自動標為已讀,
+//   之後的「只同步未讀」只看未讀徽章 -> 抓不到該新訊息。回到清單根即可讓新訊息重新出現未讀徽章。
+export async function leaveRoom(ctx, accountName, opts = {}) {
+  const bnb = bnbs[accountName];
+  if (!bnb) return false;
+  const page = ctx.pages().find((p) => p.url().includes('chat.line.biz') || p.url().includes(bnb.url)) ?? ctx.pages()[0];
+  if (!page) return false;
+  await page.goto(bnb.url, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+  console.log(`已離開聊天室, 回到『${accountName}』清單根: ${page.url()}`);
+  return true;
+}
+
 // 依日期分界列出「最新訊息日期 > dateline」的聊天室(由新到舊)。先停留在帳號聊天頁再抓清單。
 export async function getChatListByDateline(ctx, accountName, dateline, { manualTimeoutMs, ...listOpts } = {}) {
   await enterRoom(ctx, accountName, '', { manualTimeoutMs });

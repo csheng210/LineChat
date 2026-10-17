@@ -105,6 +105,8 @@ function App() {
   const [analysisLoading, setAnalysisLoading] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [analysisTab, setAnalysisTab] = useState('result') // 'result' 分析結果 | 'reply' 建議回覆
+  const [analysisHistory, setAnalysisHistory] = useState([]) // 同一份聊天的多份分析/建議歷史(最新在最後)
+  const [analysisIndex, setAnalysisIndex] = useState(-1) // 目前瀏覽的歷史索引
   const [suggestResult, setSuggestResult] = useState(null) // 推算出的建議回覆
   const [suggestLoading, setSuggestLoading] = useState(false)
   const [suggestError, setSuggestError] = useState('')
@@ -449,7 +451,8 @@ function App() {
   }
 
   // 換對話、重載或重新分析前: 清掉分析與建議回覆的所有結果
-  function clearAnalysis() {
+  // 只清右側兩個 Tab 的顯示結果(分析/建議), 保留歷史清單與索引, 供導覽套用时使用。
+  function clearAnalysisDisplay() {
     setAnalysisResult(null)
     setAnalysisError('')
     setAnalysisLoading(false)
@@ -459,15 +462,47 @@ function App() {
     setAnalysisTab('result')
   }
 
+  // 換對話/重載/重新分析前: 清掉顯示結果, 並重置歷史清單與索引。
+  function clearAnalysis() {
+    clearAnalysisDisplay()
+    setAnalysisHistory([])
+    setAnalysisIndex(-1)
+  }
+
   // 把 chat_analysis 存檔({ analysis, suggest })套到右側兩個 Tab(與即時跑完的填法一致)。
-  function applySavedAnalysis(res) {
-    if (!res || !res.found || !res.result) return
-    const { analysis, suggest } = res.result
+  // 把某一筆歷史({ analysis, suggest })套到右側兩個 Tab(與即時跑完的填法一致)。
+  function applyHistoryEntry(entry) {
+    clearAnalysisDisplay()
+    if (!entry) return
+    const { analysis, suggest } = entry
     if (analysis) setAnalysisResult(analysis)
     if (!suggest) return
     if (suggest.skipped) setSuggestError(suggest.reason || '未進行建議回覆')
     else if (suggest.error) setSuggestError(suggest.error)
     else setSuggestResult(suggest)
+  }
+
+  // 載入 chat_analysis 存檔的歷史清單, 預設顯示最新一則(向後相容舊的單一格式)。
+  function applySavedAnalysis(res) {
+    if (!res || !res.found) return
+    let history = Array.isArray(res.history) ? res.history : []
+    if (history.length === 0 && res.result) {
+      const { analysis, suggest } = res.result
+      if (analysis) history = [{ savedAt: res.savedAt || null, analysis, suggest: suggest ?? null, range: analysis.range || null }]
+    }
+    if (history.length === 0) return
+    setAnalysisHistory(history)
+    setAnalysisIndex(history.length - 1)
+    applyHistoryEntry(history[history.length - 1])
+  }
+
+  // 上一則/下一則: 只在已存檔的歷史清單間導覽, 不重新跑分析。
+  function gotoHistory(delta) {
+    if (analysisHistory.length === 0) return
+    const next = analysisIndex + delta
+    if (next < 0 || next >= analysisHistory.length) return
+    setAnalysisIndex(next)
+    applyHistoryEntry(analysisHistory[next])
   }
 
   function onPickMessage(info) {
@@ -556,6 +591,14 @@ function App() {
     else if (sug.skipped) setSuggestError(sug.reason || '未進行建議回覆')
     else if (sug.error) setSuggestError(sug.error)
     else setSuggestResult(sug)
+    // 本次「分析＋推論」已落盤: 同步追加到歷史清單並跳到最新一則。
+    if (analysis) {
+      const entry = { savedAt: new Date().toISOString(), analysis, suggest: sug ?? null, range: analysis.range || null }
+      const next = [...analysisHistory, entry]
+      const capped = next.length > 20 ? next.slice(-20) : next
+      setAnalysisHistory(capped)
+      setAnalysisIndex(capped.length - 1)
+    }
   }
 
   // 依分析結果(狀態說明 + 問題分類與分數)請後端取建議回覆; 沿用同一次的區間切片
@@ -812,6 +855,29 @@ function App() {
           <aside className="analysis-panel" style={isMobile ? undefined : { width: analysisWidth }}>
             <header className="analysis-header">
               <strong>聊天紀錄分析</strong>
+              {analysisHistory.length > 1 && (
+                <div className="analysis-nav">
+                  <button
+                    className="analysis-nav-btn"
+                    onClick={() => gotoHistory(-1)}
+                    disabled={analysisIndex <= 0}
+                    title="上一則分析"
+                  >
+                    ‹
+                  </button>
+                  <span className="analysis-nav-count">
+                    {analysisIndex + 1}/{analysisHistory.length}
+                  </span>
+                  <button
+                    className="analysis-nav-btn"
+                    onClick={() => gotoHistory(1)}
+                    disabled={analysisIndex >= analysisHistory.length - 1}
+                    title="下一則分析"
+                  >
+                    ›
+                  </button>
+                </div>
+              )}
               <button
                 className="analysis-collapse"
                 onClick={() => setAnalysisOpen(false)}

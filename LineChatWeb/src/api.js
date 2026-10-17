@@ -147,7 +147,7 @@ export async function getAnalysis(chatFile) {
   try {
     const res = await fetch(ACTIONS + '/analysis?chatFile=' + encodeURIComponent(chatFile))
     const data = await res.json().catch(() => ({}))
-    return { httpStatus: res.status, ok: !!(res.ok && data.ok), found: !!data.found, result: data.result, error: data.error }
+    return { httpStatus: res.status, ok: !!(res.ok && data.ok), found: !!data.found, result: data.result, history: data.history, chatFile: data.chatFile, savedAt: data.savedAt, error: data.error }
   } catch (err) {
     return { httpStatus: 0, ok: false, found: false, error: err.message }
   }

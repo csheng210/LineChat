@@ -291,14 +291,51 @@ function deriveClassification(a) {
   return cls;
 }
 
-// 把「分析＋推論」結果存成 JSON 到 chat_analysis(檔名與 chat_history 一致), 供清單點選時回載。
+// 分析時間 -> 檔名時間戳(本地 YYYYMMDD_HHMMSS)。
+function analysisStamp(date) {
+  const p2 = (n) => String(n).padStart(2, '0');
+  return date.getFullYear() + p2(date.getMonth() + 1) + p2(date.getDate()) + '_' + p2(date.getHours()) + p2(date.getMinutes()) + p2(date.getSeconds());
+}
+
+// 遷移舊格式: chat_analysis/<name>.json(單一 {analysis,suggest} 或 {history:[...]}) -> 拆成 <name>/<時間戳>.json, 舊檔改名 .legacy。
+function migrateLegacyAnalysis(name) {
+  const legacy = path.join(CONFIG.ANALYSIS_DIR, name + '.json');
+  if (!fs.existsSync(legacy)) return;
+  try {
+    const data = JSON.parse(fs.readFileSync(legacy, 'utf8'));
+    const dir = path.join(CONFIG.ANALYSIS_DIR, name);
+    fs.mkdirSync(dir, { recursive: true });
+    let entries = [];
+    if (Array.isArray(data.history)) entries = data.history;
+    else if (data.analysis) entries = [{ savedAt: data.savedAt || null, analysis: data.analysis, suggest: data.suggest ?? null, range: (data.analysis && data.analysis.range) || null }];
+    entries.forEach((e) => {
+      const d = e.savedAt ? new Date(e.savedAt) : new Date();
+      const stamp = analysisStamp(isNaN(d.getTime()) ? new Date() : d);
+      let outPath = path.join(dir, stamp + '.json');
+      for (let n = 2; fs.existsSync(outPath); n++) outPath = path.join(dir, stamp + '-' + n + '.json');
+      fs.writeFileSync(outPath, JSON.stringify({ savedAt: e.savedAt || null, chatFile: name, analysis: e.analysis, suggest: e.suggest ?? null, range: e.range ?? ((e.analysis && e.analysis.range) || null) }, null, 2), 'utf8');
+    });
+    fs.renameSync(legacy, legacy + '.legacy');
+    console.log(`[analyze-suggest] 遷移舊檔 -> ${dir} (${entries.length} 份)`);
+  } catch (e) {
+    console.error('[analyze-suggest] 遷移舊檔失敗:', (e && e.message) || e);
+  }
+}
+
+// 每次「分析＋建議」存成一個以分析時間命名的檔案: chat_analysis/<聊天紀錄名>/<時間戳>.json。
+//   同一組聊天紀錄、不同範圍 -> 各自一份檔案; 前端取最新並可前後導覽。
 function saveAnalysis(chatFile, analysis, suggest) {
   try {
-    fs.mkdirSync(CONFIG.ANALYSIS_DIR, { recursive: true });
     let name = path.basename(chatFile);
-    if (!name.toLowerCase().endsWith('.json')) name += '.json';
-    const outPath = path.join(CONFIG.ANALYSIS_DIR, name);
-    const payload = { savedAt: new Date().toISOString(), chatFile: name, analysis, suggest: suggest ?? null };
+    if (name.toLowerCase().endsWith('.json')) name = name.slice(0, -5);
+    const dir = path.join(CONFIG.ANALYSIS_DIR, name);
+    fs.mkdirSync(dir, { recursive: true });
+    migrateLegacyAnalysis(name);
+    const now = new Date();
+    let stamp = analysisStamp(now);
+    let outPath = path.join(dir, stamp + '.json');
+    for (let n = 2; fs.existsSync(outPath); n++) outPath = path.join(dir, stamp + '-' + n + '.json');
+    const payload = { savedAt: now.toISOString(), chatFile: name, analysis, suggest: suggest ?? null, range: (analysis && analysis.range) || null };
     fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
     console.log(`[analyze-suggest] 已存檔: ${outPath}`);
   } catch (e) {
@@ -410,12 +447,22 @@ app.get('/analysis', async (req, reply) => {
   if (chatFile.includes('..') || chatFile.includes('/') || chatFile.includes('\\')) {
     return reply.code(400).send({ ok: false, error: '非法的檔名' });
   }
-  if (!chatFile.toLowerCase().endsWith('.json')) chatFile += '.json';
-  const fp = path.join(CONFIG.ANALYSIS_DIR, chatFile);
-  if (!fs.existsSync(fp)) return reply.send({ ok: true, found: false });
+  if (chatFile.toLowerCase().endsWith('.json')) chatFile = chatFile.slice(0, -5);
+  const dir = path.join(CONFIG.ANALYSIS_DIR, chatFile);
+  // 向後相容: 舊的單一檔先遷移成每份時間戳檔案。
+  if (!fs.existsSync(dir) && fs.existsSync(path.join(CONFIG.ANALYSIS_DIR, chatFile + '.json'))) migrateLegacyAnalysis(chatFile);
+  if (!fs.existsSync(dir)) return reply.send({ ok: true, found: false });
   try {
-    const data = JSON.parse(fs.readFileSync(fp, 'utf8'));
-    return reply.send({ ok: true, found: true, result: data });
+    let history = [];
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.toLowerCase().endsWith('.json')) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        history.push({ savedAt: data.savedAt || null, analysis: data.analysis, suggest: data.suggest ?? null, range: data.range ?? ((data.analysis && data.analysis.range) || null) });
+      } catch (e) { /* 略過損毀檔 */ }
+    }
+    history.sort((a, b) => String(a.savedAt || '').localeCompare(String(b.savedAt || '')));
+    return reply.send({ ok: true, found: history.length > 0, chatFile, savedAt: history.length ? history[history.length - 1].savedAt : null, history });
   } catch (e) {
     return reply.code(500).send({ ok: false, error: '分析存檔解析失敗: ' + ((e && e.message) || e) });
   }
