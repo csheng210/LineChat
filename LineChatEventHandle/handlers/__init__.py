@@ -14,6 +14,7 @@ import config
 from handlers.base import TopicHandler
 from handlers.sync_handler import SyncTopicHandler
 from handlers.line_message_handler import LineMessageHandler
+from handlers.message_recevied_handler import MessageReceviedHandler
 
 
 def build_handlers(producer) -> list[TopicHandler]:
@@ -23,5 +24,7 @@ def build_handlers(producer) -> list[TopicHandler]:
         SyncTopicHandler(producer, topics=[config.TOPIC_SYNC]),
         # events-line-message: 新訊息觸發同步(目前用 config 預設, 未來可獨立分化)
         LineMessageHandler(producer, topics=[config.TOPIC_IN]),
+        # events-line-message-recevied: 同步完成 -> 依客人產出建議回覆 -> 發布 events-line-reply-suggest
+        MessageReceviedHandler(producer, topics=[config.TOPIC_MESSAGE_OUT]),
         # 未來新增(獨立觸發): NewTopicHandler(producer, topics=[config.TOPIC_XXX]),
     ]

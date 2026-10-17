@@ -51,7 +51,7 @@ _PROJECT_ROOT = _detect_project_root()
 DEFAULT_CHAT_DIR = Path(os.environ.get("CHAT_HISTORY_DIR", _PROJECT_ROOT / "chat_history"))
 DEFAULT_CLASSIFICATION = _PROJECT_ROOT / "民宿客服問題分類.md"
 DEFAULT_CHAT_FILE = "聊天紀錄.json"
-DEFAULT_DEBUG_DIR = Path(os.environ.get("VLLM_ANALYZE_DEBUG_DIR", _PROJECT_ROOT / "chat_vllm_debug"))
+DEFAULT_DEBUG_DIR = Path(os.environ.get("VLLM_ANALYZE_DEBUG_DIR", SCRIPT_DIR.parents[2] / "Line-Data" / "chat_vllm_suggest"))
 
 # 使用者指定的核心提示(角色與任務), 其後再串接輸出規格與資料。
 VLLM_PROMPT = (
@@ -743,7 +743,7 @@ def main():
     parser.add_argument("--out", help="把結果 JSON 另存到此檔案路徑")
     parser.add_argument("--raw", action="store_true", dest="raw",
                         help="只輸出模型原始回覆文字, 不做 JSON 包裝")
-    parser.add_argument("--debug-dir", default=str(DEFAULT_DEBUG_DIR), help="每次分析的存檔目錄(預設 chat_vllm_debug)")
+    parser.add_argument("--debug-dir", default=str(DEFAULT_DEBUG_DIR), help="每次分析的存檔目錄(預設 Line-Data/chat_vllm_suggest)")
     parser.add_argument("--no-debug", action="store_false", dest="save_debug", help="關閉每次分析的存檔")
     args = parser.parse_args()
 

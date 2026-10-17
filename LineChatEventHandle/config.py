@@ -1,6 +1,6 @@
 """config.py - 集中讀取 LineChatEventHandle/.env 與預設值。
 
-以 python-dotenv 載入 .env(不覆蓋已存在的真實環境變數), 其餘一律讀 os.environ。
+以 python-dotenv 載入 .env(override=True: 專案 .env 為權威來源, 覆蓋過期的真實環境變數), 其餘一律讀 os.environ。
 """
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 REPO = Path(__file__).resolve().parent
-# 載入 LineChatEventHandle/.env(若存在); override=False -> 真實環境優先。
-load_dotenv(REPO / ".env", override=False)
+# 載入 LineChatEventHandle/.env(若存在); override=True -> 專案 .env 優先(避免髒的系統環境變數蓋掉)。
+load_dotenv(REPO / ".env", override=True)
 
 
 def _int(name: str, default: int) -> int:
@@ -50,6 +50,8 @@ TOPIC_SYNC = os.environ.get("KAFKA_TOPIC_SYNC", "events-line-sync")
 TOPIC_OUT = os.environ.get("KAFKA_TOPIC_OUT", "events-line-synced")
 # events-line-message 同步完成後發布的 topic(與 events-line-synced 分開)。
 TOPIC_MESSAGE_OUT = os.environ.get("KAFKA_TOPIC_MESSAGE_OUT", "events-line-message-recevied")
+# events-line-message-recevied 處理後, 建議回覆發布的 topic。
+TOPIC_REPLY_OUT = os.environ.get("KAFKA_TOPIC_REPLY_OUT", "events-line-reply-suggest")
 KAFKA_CONNECT_TIMEOUT_MS = _int("KAFKA_CONNECT_TIMEOUT_MS", 15000)
 KAFKA_REQUEST_TIMEOUT_MS = _int("KAFKA_REQUEST_TIMEOUT_MS", 30000)
 # mainloop 每輪 consumer.poll 的逾時(毫秒): 決定主迴圈空轉間隔與 flush_due 檢查頻率。
@@ -72,6 +74,8 @@ DATA_DIR = _data_path if _data_path.is_absolute() else (REPO / _data_path).resol
 CHAT_LINE_MESSAGE_UNREAD_DIR = Path(
     os.environ.get("LINE_CHAT_UNREAD_DIR") or (DATA_DIR / "chat_line_message_unread")
 )
+# chat_history 目錄(同步寫入的聊天紀錄; 未讀紀錄以 Unread=true 標記)。
+CHAT_HISTORY_DIR = DATA_DIR / "chat_history"
 SYNC_DEBOUNCE_MS = _int("SYNC_DEBOUNCE_MS", 15000)
 SYNC_MAX_BATCH_MS = _int("SYNC_MAX_BATCH_MS", 120000)
 SYNC_DAYS = _int("SYNC_DAYS", 2)

@@ -18,6 +18,19 @@ const app = Fastify({ logger: false, bodyLimit: 1_000_000 });
 // 同步任務狀態(單一走馬燈): running + last 快照
 const sync = { running: false, last: null };
 
+// ---- 分析任務(非同步): 長請求改 202 + 輪詢, 避免外部網域 NAT 切斷長連線 ----
+const jobs = new Map();
+let jobSeq = 0;
+function newJob(type, meta) {
+  const id = 'job-' + Date.now().toString(36) + '-' + (++jobSeq);
+  const job = { id, type, meta, running: true, done: false, ok: false, startedAt: Date.now(), finishedAt: null, result: null, analysis: null, suggest: null, error: null };
+  jobs.set(id, job);
+  if (jobs.size > 60) {
+    for (const [k, v] of jobs) { if (v.done) { jobs.delete(k); if (jobs.size <= 60) break; } }
+  }
+  return job;
+}
+
 // ---- 串行佇列(concurrency=1)+ 佇列上限 ----
 let running = false;
 const waiters = [];
@@ -183,9 +196,17 @@ app.post('/analyze', async (req, reply) => {
   if (startIndex !== null) pyArgs.push('--start-index', String(startIndex));
   if (endIndex !== null) pyArgs.push('--end-index', String(endIndex));
   console.log(`[analyze] ${chatFile}${startIndex !== null || endIndex !== null ? ` 區間[${startIndex}..${endIndex}]` : ''}`);
-  const run = await runPythonJson(script, pyArgs, '分析');
-  if (run.code !== 200) return reply.code(run.code).send({ ok: false, error: run.error, raw: run.raw });
-  return reply.send({ ok: true, result: run.result });
+  // 長請求改非同步: 立即回 202 + jobId, 由 GET /analysis-job 輪詢, 避免外部 NAT 切斷長連線。
+  const job = newJob('analyze', { chatFile, startIndex, endIndex });
+  (async () => {
+    const run = await runPythonJson(script, pyArgs, '分析');
+    job.running = false;
+    job.done = true;
+    job.finishedAt = Date.now();
+    if (run.code !== 200) { job.ok = false; job.error = run.error; job.raw = run.raw; }
+    else { job.ok = true; job.result = run.result; }
+  })();
+  return reply.code(202).send({ ok: true, started: true, jobId: job.id });
 });
 
 // ---- 建議回覆: POST /suggest (spawn src/py/chat_vllm_suggest.py) ----
@@ -290,6 +311,59 @@ function sendSaved(reply, chatFile, analysis, suggest) {
   return reply.send({ ok: true, result: { analysis, suggest } });
 }
 
+async function runAnalyzeSuggest(chatFile, startIndex, endIndex, mdPath) {
+  const aScript = CONFIG.PY_ANALYZE;
+  const sScript = CONFIG.PY_SUGGEST;
+  // 1) 分析
+  const aArgs = [aScript, chatFile, '--chat-dir', CONFIG.CHAT_DIR, '--classification', mdPath, '--timeout', '300'];
+  if (startIndex !== null) aArgs.push('--start-index', String(startIndex));
+  if (endIndex !== null) aArgs.push('--end-index', String(endIndex));
+  console.log(`[analyze-suggest] ${chatFile}${startIndex !== null || endIndex !== null ? ` 區間[${startIndex}..${endIndex}]` : ''}`);
+  const aRun = await runPythonJson(aScript, aArgs, '分析');
+  if (aRun.code !== 200) {
+    // 分析本身失敗: 仍盡量把已取得的結果(若有)帶回, 但不進行建議回覆。
+    return { ok: false, error: aRun.error, analysis: aRun.result, raw: aRun.raw };
+  }
+  const analysis = aRun.result;
+
+  // 2) 依分析結果決定是否/如何跑建議回覆
+  if (analysis.parse_ok === false) {
+    const sug = { skipped: true, reason: '分析無法解析模型回應，未進行建議回覆' };
+    saveAnalysis(chatFile, analysis, sug);
+    return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
+  }
+  const cls = deriveClassification(analysis);
+  if (cls.length === 0) {
+    const sug = { skipped: true, reason: '未取得問題分類，未進行建議回覆' };
+    saveAnalysis(chatFile, analysis, sug);
+    return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
+  }
+
+  const sArgs = [
+    sScript, chatFile,
+    '--chat-dir', CONFIG.CHAT_DIR,
+    '--rag-dir', CONFIG.RAG_DIR,
+    '--classification-json', JSON.stringify(cls),
+    '--final-status', (analysis.final_status || '').toString(),
+    '--pending-question', (analysis.pending_question || '').toString(),
+    '--summary', (analysis.summary || '').toString(),
+    '--timeout', '300',
+    '--agent-timeout', String(CONFIG.AGENT_TIMEOUT || '150'),
+  ];
+  if (startIndex !== null) sArgs.push('--start-index', String(startIndex));
+  if (endIndex !== null) sArgs.push('--end-index', String(endIndex));
+  console.log(`[analyze-suggest] 建議回覆: 首選分類=${cls[0].category}(${cls[0].score})`);
+  const sRun = await runPythonJson(sScript, sArgs, '建議回覆');
+  if (sRun.code !== 200) {
+    // 分析成功但建議回覆失敗: 仍回 200 + 分析結果並存檔, suggest 帶 error 供前端提示。
+    const sug = { error: sRun.error, raw: sRun.raw };
+    saveAnalysis(chatFile, analysis, sug);
+    return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
+  }
+  saveAnalysis(chatFile, analysis, sRun.result);
+  return { ok: true, analysis, suggest: sRun.result, result: { analysis, suggest: sRun.result } };
+}
+
 app.post('/analyze-suggest', async (req, reply) => {
   const b = req.body || {};
   let chatFile = (b.chatFile || '').toString().trim();
@@ -311,47 +385,20 @@ app.post('/analyze-suggest', async (req, reply) => {
   if (!fs.existsSync(sScript)) return reply.code(500).send({ ok: false, error: '建議回覆腳本不存在: ' + sScript });
   if (!fs.existsSync(CONFIG.RAG_DIR)) return reply.code(500).send({ ok: false, error: '找不到分類對應文檔目錄: ' + CONFIG.RAG_DIR });
 
-  // 1) 分析
-  const aArgs = [aScript, chatFile, '--chat-dir', CONFIG.CHAT_DIR, '--classification', mdPath, '--timeout', '300'];
-  if (startIndex !== null) aArgs.push('--start-index', String(startIndex));
-  if (endIndex !== null) aArgs.push('--end-index', String(endIndex));
-  console.log(`[analyze-suggest] ${chatFile}${startIndex !== null || endIndex !== null ? ` 區間[${startIndex}..${endIndex}]` : ''}`);
-  const aRun = await runPythonJson(aScript, aArgs, '分析');
-  if (aRun.code !== 200) {
-    // 分析本身失敗: 仍盡量把已取得的結果(若有)帶回, 但不進行建議回覆。
-    return reply.code(aRun.code).send({ ok: false, error: aRun.error, analysis: aRun.result, raw: aRun.raw });
-  }
-  const analysis = aRun.result;
-
-  // 2) 依分析結果決定是否/如何跑建議回覆
-  if (analysis.parse_ok === false) {
-    return sendSaved(reply, chatFile, analysis, { skipped: true, reason: '分析無法解析模型回應，未進行建議回覆' });
-  }
-  const cls = deriveClassification(analysis);
-  if (cls.length === 0) {
-    return sendSaved(reply, chatFile, analysis, { skipped: true, reason: '未取得問題分類，未進行建議回覆' });
-  }
-
-  const sArgs = [
-    sScript, chatFile,
-    '--chat-dir', CONFIG.CHAT_DIR,
-    '--rag-dir', CONFIG.RAG_DIR,
-    '--classification-json', JSON.stringify(cls),
-    '--final-status', (analysis.final_status || '').toString(),
-    '--pending-question', (analysis.pending_question || '').toString(),
-    '--summary', (analysis.summary || '').toString(),
-    '--timeout', '300',
-    '--agent-timeout', String(CONFIG.AGENT_TIMEOUT || '150'),
-  ];
-  if (startIndex !== null) sArgs.push('--start-index', String(startIndex));
-  if (endIndex !== null) sArgs.push('--end-index', String(endIndex));
-  console.log(`[analyze-suggest] 建議回覆: 首選分類=${cls[0].category}(${cls[0].score})`);
-  const sRun = await runPythonJson(sScript, sArgs, '建議回覆');
-  if (sRun.code !== 200) {
-    // 分析成功但建議回覆失敗: 仍回 200 + 分析結果並存檔, suggest 帶 error 供前端提示。
-    return sendSaved(reply, chatFile, analysis, { error: sRun.error, raw: sRun.raw });
-  }
-  return sendSaved(reply, chatFile, analysis, sRun.result);
+  // 長請求改非同步: 立即回 202 + jobId, 由 GET /analysis-job 輪詢, 避免外部 NAT 切斷長連線。
+  const job = newJob('analyze-suggest', { chatFile, startIndex, endIndex });
+  (async () => {
+    const out = await runAnalyzeSuggest(chatFile, startIndex, endIndex, mdPath);
+    job.running = false;
+    job.done = true;
+    job.finishedAt = Date.now();
+    job.ok = out.ok;
+    job.analysis = out.analysis;
+    job.suggest = out.suggest;
+    job.result = out.result;
+    job.error = out.error;
+  })();
+  return reply.code(202).send({ ok: true, started: true, jobId: job.id });
 });
 
 // ---- 讀取「分析＋推論」存檔: GET /analysis?chatFile=... ----
@@ -372,6 +419,23 @@ app.get('/analysis', async (req, reply) => {
   } catch (e) {
     return reply.code(500).send({ ok: false, error: '分析存檔解析失敗: ' + ((e && e.message) || e) });
   }
+});
+
+// ---- 輪詢分析任務: GET /analysis-job?id=... ----
+//   由 POST /analyze 或 /analyze-suggest 回傳的 jobId 輪詢; done=true 時帶 result/analysis/suggest/error。
+app.get('/analysis-job', async (req, reply) => {
+  const id = ((req.query && req.query.id) || '').toString().trim();
+  const job = jobs.get(id);
+  if (!job) return reply.code(404).send({ ok: false, done: true, error: '找不到分析任務(可能已過期), 請重新執行' });
+  return reply.send({
+    ok: true,
+    running: job.running,
+    done: job.done,
+    result: job.result,
+    analysis: job.analysis,
+    suggest: job.suggest,
+    error: job.error,
+  });
 });
 
 // ---- 同步聊天紀錄(長任務): POST /sync 立即回 202, 進度由 GET /sync/status 輪詢 ----

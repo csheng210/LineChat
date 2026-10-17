@@ -37,7 +37,7 @@ npm start        # 或 npm run dev (含 --watch)
   依 `question_class_rag/maps.json`(分類 -> 參考文檔)取對應的 `reference/*.md` 內文, 連同聊天紀錄與狀態一起問 vLLM。
   回傳 `{ ok, result }`, `result` 含 `{ parse_ok, reply, basis[], caveat, references[] }`。
   `maps.json` 形如 `{ "baseDir": "reference", "map": { "5. 位置與交通停車": "05-位置與交通停車.md" } }`; 目錄可用 `ACTIONS_RAG_DIR` 覆寫。
-  兩者的 python 共用同一支 vLLM 串流呼叫與重試階梯(`call_vllm_json`), 每次執行都存檔到 `chat_vllm_debug/`。
+  兩者的 python 共用同一支 vLLM 串流呼叫與重試階梯(`call_vllm_json`), 每次執行都存檔到 `Line-Data/chat_vllm_suggest/`。
 
 - `POST /sync`    啟動「同步聊天紀錄」長任務(非同步)。body 可選 `{ "days": 2, "includeUnread": true, "dryRun": false, "accounts": ["澎湖民宿藍海天晴"] }`。
   立即回 `202 { ok, started }`。同步邏輯已內建於本服務(`src/sync_flow.mjs` 等): 逐帳號做已讀增量備份、未讀以預覽方式抓取並合併、整合新舊檔、再以自帶的 `src/py/fill_sticker_image_info.py` 回填貼圖/圖片語意(共用 root 的 `chat-history-img-url-cache.db` 與 `chat_media`)。

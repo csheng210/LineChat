@@ -2,12 +2,14 @@
 
 events-line-message 由上游(LINE 網頁端訊息事件)產生, 代表「客人有新訊息進來」。
 收到訊息(value 見 samples/events-line-message.sample.json)後的流程:
-  1) 把該訊息寫入 Line-Data/chat_line_message_unread(檔名與 chat_history 一致:
-     {帳號}-{YYYY_MM_DD}-{使用者}.json, 內容為與 chat_history 同構的紀錄)。
-  2) 觸發一次同步聊天紀錄(trigger_sync_once, 用 config 預設參數)。
-  3) 同步完成後發布到 events-line-message-recevied(與 events-line-synced 分開)。
+  1) 取出本次訊息內容(message.content)。
+  2) 觸發「只同步未讀」的同步(only_unread=True); 同步後 chat_history 內未讀紀錄以 Unread=true 標記。
+  3) 掃描 chat_history 的未讀紀錄, 取其「最後一則訊息」內容與步驟1 內容比對;
+     命中者以該紀錄的 民宿名(account) + 客人顯示名(person) 作檔名 {民宿名}-{客人顯示名}.json,
+     把本次 kafka 收到的訊息存入 chat_line_message_unread。
+  4) 發布到 events-line-message-recevied(與 events-line-synced 分開)。
 
-合併窗口內的多則訊息會先各自寫入未讀檔, 再合併觸發一次同步, 完成後發布一次。
+合併窗口內的多則訊息會合併觸發一次同步, 完成後逐則比對寫入, 發布一次。
 """
 from __future__ import annotations
 
@@ -41,43 +43,25 @@ def _decode(value):
     return value if isinstance(value, dict) else None
 
 
-def _split_datetime(s):
-    """'2026-10-01 13:14' -> ('2026/10/01', '13:14'); 解析失敗回 ('', '')。"""
-    if not s:
-        return "", ""
-    parts = str(s).strip().split()
-    date_raw = parts[0] if parts else ""
-    tm = parts[1] if len(parts) > 1 else ""
-    m = re.match(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", date_raw)
-    if not m:
-        return "", tm
-    date = f"{m[1]}/{int(m[2]):02d}/{int(m[3]):02d}"
-    return date, tm
-
-
 def _parse_message(value):
-    """events-line-message 的 value -> 單則訊息(chat_history 同構欄位) + 檔案資訊。
+    """events-line-message 的 value -> { content, value, account, person } 或 None。
 
-    回傳 dict: { account, person, date, value(原始訊息物件) } 或 None(無法解析)。
+    content = message.content(本次訊息內容, 用於與未讀紀錄最後訊息比對);
+    account/person 取自 kafka line_user(僅供除錯/備援, 正式檔名以比對命中的 chat 紀錄為準)。
     """
     v = _decode(value)
     if not v:
         return None
     lu = v.get("line_user") or {}
     msg = v.get("message") or {}
-    account = (lu.get("hotelname") or "").strip()
-    person = (lu.get("name") or "").strip()
-    account_id = (lu.get("id") or "").strip()
-    if not account and not person:
+    content = (msg.get("content") or "").strip()
+    if not content:
         return None
-    date, tm = _split_datetime(msg.get("send_time"))
-    if not date:
-        date, _ = _split_datetime(v.get("timestamp"))
     return {
-        "account": account,
-        "person": person,
-        "date": date,
-        "value": v,   # 原始訊息物件(直接存進 list)
+        "content": content,
+        "value": v,
+        "account": (lu.get("hotelname") or "").strip(),
+        "person": (lu.get("name") or "").strip(),
     }
 
 
@@ -89,16 +73,40 @@ def _dedup_key(item: dict) -> str:
     return "raw:" + json.dumps(item, ensure_ascii=False, sort_keys=True)
 
 
-def _write_unread(parsed: dict) -> str:
-    """把原始訊息物件 append 進 chat_line_message_unread 的 list(檔名同 chat_history)。
+def _scan_unread_records(chat_dir):
+    """掃描 chat_history 中 Unread=true 的紀錄, 回傳 [{account, person, last_content, fname}]。
 
-    檔案內容為 list[原始訊息物件]; 多則 append; 依 reply_token 去重避免重複入列。
+    未讀紀錄檔名 {民宿}-{日期}-{客人}.json; record 含 account/person/messages[]。
+    last_content = 最後一則訊息的 content(用於與本次 kafka 訊息內容比對)。
     """
-    account = parsed["account"]
-    person = parsed["person"]
-    date = parsed["date"]
-    date_seg = date.replace("/", "_") if date else "noDate"
-    fname = f"{_fn_safe(account)}-{date_seg}-{_fn_safe(person)}.json"
+    records = []
+    try:
+        files = list(chat_dir.glob("*.json"))
+    except Exception:
+        return records
+    for f in files:
+        try:
+            obj = json.loads(f.read_text("utf-8"))
+        except Exception:
+            continue
+        if not isinstance(obj, dict) or obj.get("Unread") is not True:
+            continue
+        msgs = obj.get("messages")
+        if not isinstance(msgs, list) or not msgs:
+            continue
+        last = msgs[-1] if isinstance(msgs[-1], dict) else {}
+        records.append({
+            "account": obj.get("account") or "",
+            "person": obj.get("person") or "",
+            "last_content": (last.get("content") or "").strip(),
+            "fname": f.name,
+        })
+    return records
+
+
+def _write_unread(account: str, person: str, value: dict) -> str:
+    """把本次 kafka 訊息 append 進 chat_line_message_unread 的 list(檔名 {民宿名}-{客人顯示名}.json)。"""
+    fname = f"{_fn_safe(account)}-{_fn_safe(person)}.json"
     import os
     os.makedirs(config.CHAT_LINE_MESSAGE_UNREAD_DIR, exist_ok=True)
     fpath = config.CHAT_LINE_MESSAGE_UNREAD_DIR / fname
@@ -111,16 +119,15 @@ def _write_unread(parsed: dict) -> str:
         except Exception:
             items = []
     seen = {_dedup_key(it) for it in items if isinstance(it, dict)}
-    new = parsed["value"]
-    k = _dedup_key(new)
+    k = _dedup_key(value)
     if k not in seen:
-        items.append(new)
+        items.append(value)
     fpath.write_text(json.dumps(items, ensure_ascii=False, indent=2), "utf-8")
     return fname
 
 
 class LineMessageHandler(SyncTriggerHandler):
-    """events-line-message: 寫入未讀檔 -> 觸發同步 -> 發布 events-line-message-recevied。"""
+    """events-line-message: 只同步未讀 -> 比對未讀紀錄最後訊息 -> 寫入未讀檔 -> 發布。"""
 
     def __init__(self, producer, topics) -> None:
         super().__init__(producer, topics)
@@ -132,29 +139,20 @@ class LineMessageHandler(SyncTriggerHandler):
             self._messages.append(parsed)
 
     def trigger_params(self) -> dict:
-        return {}   # 全用 config 預設同步參數
+        return {"only_unread": True}   # 只同步未讀的聊天紀錄
 
     def reset_state(self) -> None:
         self._messages = []
 
     def _flush(self) -> None:
-        """寫入未讀檔 -> 觸發一次同步 -> 發布 events-line-message-recevied(成功/失敗都發)。"""
+        """觸發「只同步未讀」-> 比對未讀紀錄 -> 寫入 chat_line_message_unread -> 發布。"""
         count = self._pending
         topics = sorted(self._topics_seen)
         batch = list(self._messages)
         params = self.trigger_params()
         self._reset()
 
-        # 1) 寫入 chat_line_message_unread(每則訊息依 帳號+日期+使用者 歸檔)
-        written = []
-        for parsed in batch:
-            try:
-                written.append(_write_unread(parsed))
-            except Exception as e:
-                print(f"[unread] 寫入失敗: {e}")
-        print(f"[{','.join(topics)}] 合併 {count} 則 -> 寫入未讀 {len(written)} 檔 -> 發起同步 (params={params}) ...")
-
-        # 2) 觸發同步
+        # 1) 觸發「只同步未讀」
         try:
             r = trigger_sync_once(**params)
         except Exception as e:
@@ -165,12 +163,37 @@ class LineMessageHandler(SyncTriggerHandler):
                 "ok": False,
                 "syncedAt": _iso(now_ms),
                 "triggerCount": count,
-                "unreadFiles": sorted(set(written)),
                 "error": str(e),
             })
             return
 
-        # 3) 同步完成 -> 發布 events-line-message-recevied
+        # 2) 掃描 chat_history 未讀紀錄(Unread=true)
+        unread = _scan_unread_records(config.CHAT_HISTORY_DIR)
+        print(f"[{','.join(topics)}] 合併 {count} 則 -> 只同步未讀完成 -> 未讀紀錄 {len(unread)} 筆 -> 逐則比對 ...")
+
+        # 3) 逐則 kafka 訊息: 比對未讀紀錄「最後訊息內容」, 命中者寫入(檔名用紀錄的 民宿名+客人顯示名)
+        written = []
+        matches = []
+        for parsed in batch:
+            content = parsed["content"]
+            hit = [rec for rec in unread if rec["last_content"] == content]
+            if not hit:
+                print(f"[unread] 無相符未讀紀錄: content={content!r} (kafka 帳號={parsed['account']}/{parsed['person']})")
+                continue
+            for rec in hit:
+                try:
+                    fname = _write_unread(rec["account"], rec["person"], parsed["value"])
+                    written.append(fname)
+                    matches.append({
+                        "hotelname": rec["account"],
+                        "name": rec["person"],
+                        "content": content,
+                        "chat_file": rec["fname"],
+                    })
+                except Exception as e:
+                    print(f"[unread] 寫入失敗: {e}")
+
+        # 4) 發布 events-line-message-recevied
         self._publish_message({
             "source": "LineChatEventHandle",
             "topics": topics,
@@ -183,6 +206,7 @@ class LineMessageHandler(SyncTriggerHandler):
             "durationMs": r["duration_ms"],
             "triggerCount": count,
             "unreadFiles": sorted(set(written)),
+            "matches": matches,
             "summary": r["summary"],
         })
 

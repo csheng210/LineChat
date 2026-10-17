@@ -24,6 +24,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import urllib.error
@@ -496,6 +497,62 @@ def suggest_reply(chat_arg, *, classification=None, final_status=None,
 
 
 suggest = suggest_reply
+
+# ---------- 依 民宿名 + 客人名 定位歷史紀錄並產出建議回覆 ----------
+
+_FN_SAFE_RE = re.compile(r'[\\/:*?"<>|]')
+
+
+def _fn_safe(s):
+    """與 LineChatActions merge.mjs 的 FN_SAFE 一致: 非法檔名字元 -> 底線。"""
+    return _FN_SAFE_RE.sub("_", str(s or "")).strip()
+
+
+def resolve_chat_path_by_person(hotelname, name, chat_dir=DEFAULT_CHAT_DIR):
+    """依 民宿名(hotelname) + 客人名(name) 定位 chat_history 紀錄檔。
+
+    檔名規則(與 LineChatActions merge.mjs 一致): {hotelname}-{YYYY_MM_DD}-{name}.json;
+    同一客人跨多日會有多份, 取日期最新的一份。找不到回 None。
+    """
+    chat_dir = Path(chat_dir)
+    if not chat_dir.is_dir():
+        return None
+    hotel = _fn_safe(hotelname)
+    person = _fn_safe(name)
+    if not hotel or not person:
+        return None
+    pat = re.compile(r"^" + re.escape(hotel) + r"-(\d{4}_\d{2}_\d{2})-" + re.escape(person) + r"$")
+    best = None
+    best_date = ""
+    for f in chat_dir.glob("*.json"):
+        m = pat.match(f.stem)
+        if not m:
+            continue
+        d = m.group(1)
+        if d > best_date:
+            best_date = d
+            best = f
+    return best.resolve() if best else None
+
+
+def suggest_reply_by_person(hotelname, name, *, chat_dir=DEFAULT_CHAT_DIR, **kwargs):
+    """先依 hotelname + name 找到歷史紀錄檔, 再呼叫 suggest_reply 產出建議回覆。
+
+    其餘參數(classification/final_status/rag_dir/base_url/model...)原樣透傳給 suggest_reply。
+    回傳 (result, text, usage); 找不到檔案時 result 帶 ok=False 與原因。
+    """
+    chat_path = resolve_chat_path_by_person(hotelname, name, chat_dir=chat_dir)
+    if chat_path is None:
+        return (
+            {"ok": False, "hotelname": hotelname, "name": name,
+             "error": "找不到對應的聊天紀錄檔", "chat_dir": str(chat_dir)},
+            "", {},
+        )
+    result, text, usage = suggest_reply(str(chat_path), chat_dir=chat_dir, **kwargs)
+    result.setdefault("hotelname", hotelname)
+    result.setdefault("name", name)
+    result["chat_file"] = chat_path.name
+    return result, text, usage
 
 
 def _parse_json_arg(value, label):

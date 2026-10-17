@@ -3,6 +3,19 @@
 //   送訊息已移出前端(不再用 Vite dev plugin), 改經 Vite proxy /actions/* 轉到獨立服務。
 const ACTIONS = '/actions'
 
+// 輪詢非同步分析任務(POST 回 jobId -> GET /analysis-job 輪詢)。
+//   每次輪詢都是短請求, 避免外部網域 NAT 切斷 20~60 秒的長連線。
+async function pollAnalysisJob(jobId, { intervalMs = 1500, maxMs = 360000 } = {}) {
+  const start = Date.now()
+  while (Date.now() - start < maxMs) {
+    await new Promise((r) => setTimeout(r, intervalMs))
+    const res = await fetch(ACTIONS + '/analysis-job?id=' + encodeURIComponent(jobId))
+    const data = await res.json().catch(() => ({}))
+    if (data.done) return { httpStatus: res.status, data }
+  }
+  return { httpStatus: 0, data: { done: true, ok: false, error: '分析逾時（等待超過 360 秒）' } }
+}
+
 export async function sendChatMessage({ account, person, message }) {
   const res = await fetch(ACTIONS + '/send', {
     method: 'POST',
@@ -41,8 +54,12 @@ export async function analyzeChat(chatFile, range) {
         endIndex: range?.endIndex,
       }),
     })
-    const data = await res.json().catch(() => ({}))
-    return { httpStatus: res.status, ok: !!(res.ok && data.ok), result: data.result, error: data.error }
+    const start = await res.json().catch(() => ({}))
+    if (!res.ok || !start.started) {
+      return { httpStatus: res.status, ok: false, result: null, error: start.error || ('啟動分析失敗 (HTTP ' + res.status + ')') }
+    }
+    const { httpStatus, data } = await pollAnalysisJob(start.jobId)
+    return { httpStatus, ok: !!(data.ok && data.done), result: data.result, error: data.error }
   } catch (err) {
     return { httpStatus: 0, ok: false, error: err.message }
   }
@@ -77,10 +94,14 @@ export async function analyzeAndSuggest(chatFile, range) {
         endIndex: range?.endIndex,
       }),
     })
-    const data = await res.json().catch(() => ({}))
+    const start = await res.json().catch(() => ({}))
+    if (!res.ok || !start.started) {
+      return { httpStatus: res.status, ok: false, result: null, analysis: null, error: start.error || ('啟動分析＋推論失敗 (HTTP ' + res.status + ')') }
+    }
+    const { httpStatus, data } = await pollAnalysisJob(start.jobId)
     return {
-      httpStatus: res.status,
-      ok: !!(res.ok && data.ok),
+      httpStatus,
+      ok: !!(data.ok && data.done),
       result: data.result,
       analysis: data.analysis,
       error: data.error,
