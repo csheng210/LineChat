@@ -12,6 +12,7 @@ import struct
 import time
 import uuid
 from pathlib import Path
+from typing import Optional
 
 import requests
 import websocket  # pip install websocket-client
@@ -152,7 +153,7 @@ def clean_prompt(text: str) -> str:
     return text.strip()
 
 
-def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None, output_key="images"):
+def run_workflow(prompt: dict, save_node: str, preview_node: Optional[str], log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None, output_key="images"):
     """排隊工作流並等待完成，回傳 history 的 outputs 字典。失敗丟例外。"""
     client_id = str(uuid.uuid4())
     state = {"prompt_id": None, "done": False, "error": None, "cancelled": False}
