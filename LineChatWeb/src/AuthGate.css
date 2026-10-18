@@ -1,6 +1,6 @@
 .auth-center {
   height: 100%;
-  min-height: 100vh;
+  min-height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -21,25 +21,17 @@
   to { transform: rotate(360deg); }
 }
 
-/* 授權後外框: 直排填滿視窗, status bar 佔自身高度, 主內容吃剩餘高度 */
+/* 外框: 直排 = 頂端 status bar + 下方 body(dock bar + 內容) */
 .auth-shell {
   display: flex;
   flex-direction: column;
   height: 100vh;
 }
 
-.auth-content {
-  flex: 1;
-  min-height: 0;
-}
-
-/* 頂端 status bar: 左=品牌, 右=帳號圖示 */
 .auth-statusbar {
   flex: none;
-  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   padding: 6px 14px;
   background: #fff;
   border-bottom: 1px solid #e6e6e6;
@@ -51,39 +43,62 @@
   color: #06c755;
 }
 
-.auth-account {
-  position: relative;
+/* body: 左 docker bar + 右主內容 */
+.auth-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
 }
 
+/* docker bar: 寬度=圖示寬, 上=首頁, 下=帳號 */
+.auth-dock {
+  flex: none;
+  width: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  background: #f7f7f7;
+  border-right: 1px solid #e6e6e6;
+}
+
+.auth-dock-btn,
 .auth-account-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   padding: 0;
   color: #666;
-  background: #fff;
-  border: 1px solid #d0d0d0;
-  border-radius: 999px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 10px;
   cursor: pointer;
 }
 
+.auth-dock-btn:hover,
 .auth-account-btn:hover {
   color: #06c755;
-  border-color: #06c755;
+  background: #eaf7ef;
 }
 
 .auth-account-btn.on {
   color: #06c755;
-  border-color: #06c755;
+  background: #eaf7ef;
+  border-color: #b9e6cb;
 }
 
-/* 圖示展開的 popover */
+.auth-account {
+  position: relative;
+}
+
+/* 帳號 popover: 往右展開(dock 在最左) */
 .auth-popover {
   position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  left: calc(100% + 8px);
+  bottom: 0;
   z-index: 10000;
   width: 240px;
   padding: 14px;
@@ -170,6 +185,12 @@
   background: #b9e6cb;
   border-color: #b9e6cb;
   cursor: not-allowed;
+}
+
+/* 主內容 */
+.auth-content {
+  flex: 1;
+  min-width: 0;
 }
 
 /* 未登入時主內容區提示 */

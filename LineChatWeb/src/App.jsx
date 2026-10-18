@@ -155,6 +155,16 @@ function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [isMobile])
 
+  // 首頁圖示(dock bar): 收合行動版 overlay 並回到清單頂端
+  useEffect(() => {
+    const onHome = () => {
+      if (isMobile) { setSidebarOpen(false); setAnalysisOpen(false) }
+      if (scrollRef.current) scrollRef.current.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+    window.addEventListener('linechat-home', onHome)
+    return () => window.removeEventListener('linechat-home', onHome)
+  }, [isMobile])
+
   // 帳號下拉選項: 從後端的宅數據派生, 新壞帳號會自動出現
   useEffect(() => {
     fetch('/api/accounts')
@@ -1277,6 +1287,7 @@ function AnalysisView({ data }) {
 }
 
 export default App
+
 
 
 

@@ -34,3 +34,4 @@ auth.json
 # 驗證用暫存截圖
 _shot_*.png
 _s*.png
+_d*.png
