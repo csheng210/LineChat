@@ -48,6 +48,7 @@
   flex: 1;
   min-height: 0;
   display: flex;
+  position: relative;
 }
 
 /* docker bar: 寬度=圖示寬, 上=首頁, 下=帳號 */
@@ -661,4 +662,136 @@
 
 .gen-save:hover {
   background: #eaf9ef;
+}
+.gen-result-video {
+  max-width: 100%;
+  max-height: 60vh;
+  border: 1px solid #d0d0d0;
+  border-radius: 10px;
+  background: #000;
+  align-self: flex-start;
+}
+
+
+/* ===== 生圖 status bar: 標題 + 選擇功能按鈕 ===== */
+.gen-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.gen-title {
+  flex: 1;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: #06c755;
+}
+
+.gen-menubtn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #06c755;
+  background: #fff;
+  border: 1px solid #b9e6cb;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.gen-menubtn:hover {
+  background: #eaf7ef;
+}
+
+.gen-menubtn.open {
+  color: #fff;
+  background: #06c755;
+  border-color: #06c755;
+}
+
+/* ===== 左側滑出功能選單 ===== */
+.gen-drawer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  z-index: 9000;
+  width: 260px;
+  max-width: 82vw;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  border-right: 1px solid #e6e6e6;
+  box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
+  overflow-y: auto;
+  transform: translateX(-100%);
+  transition: transform 0.25s ease;
+}
+
+.gen-drawer.open {
+  transform: translateX(0);
+}
+
+.gen-drawer-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #06c755;
+  padding: 2px 4px 6px;
+}
+
+.gen-drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 8990;
+  background: rgba(0, 0, 0, 0.28);
+}
+
+@media (min-width: 861px) {
+  .gen-drawer-backdrop {
+    display: none;
+  }
+}
+
+
+/* ===== 聊天 status bar: 清單 | LINE 聊天紀錄 | 分析 ===== */
+.chat-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.chat-statusbar .auth-brand {
+  flex: 1;
+  text-align: center;
+}
+
+.chat-status-btn {
+  flex: none;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #06c755;
+  background: #fff;
+  border: 1px solid #b9e6cb;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-status-btn:hover {
+  background: #eaf7ef;
+}
+
+.chat-status-btn.active {
+  color: #fff;
+  background: #06c755;
+  border-color: #06c755;
 }

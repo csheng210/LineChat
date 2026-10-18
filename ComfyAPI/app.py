@@ -36,6 +36,7 @@ import comfy_core as core
 import run_text2img
 import run_image1_edit
 import run_image2_edit
+import run_image2video
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -65,6 +66,12 @@ def _respond(image_bytes: bytes, out_prompt: str, as_json: bool):
     resp = Response(content=image_bytes, media_type="image/png")
     resp.headers["X-Output-Prompt"] = urllib.parse.quote(out_prompt)
     return resp
+
+
+def _respond_video(video_bytes: bytes, as_json: bool):
+    if as_json:
+        return JSONResponse({"video_base64": base64.b64encode(video_bytes).decode("ascii")})
+    return Response(content=video_bytes, media_type="video/mp4")
 
 
 @app.get("/health")
@@ -133,6 +140,29 @@ def image2_edit(
     return _respond(image_bytes, out_prompt, as_json)
 
 
+@app.post("/image2video")
+def image2video(
+    image: UploadFile = File(..., description="輸入圖"),
+    prompt: str = Form(..., description="提示詞"),
+    duration: Optional[int] = Form(15, description="影片秒數"),
+    seed: Optional[int] = Form(-1),
+    as_json: Optional[bool] = Form(False),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    try:
+        video_bytes = run_image2video.generate(
+            image_path=path, prompt=prompt, duration=duration, seed=seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    return _respond_video(video_bytes, as_json)
+
+
 # ---- 非同步任務(供前端進度條輪詢) ----
 # POST /job/* 送任務回 job_id; 背景執行緒跑生成並更新進度; GET /job?id= 輪詢狀態。
 JOBS = {}
@@ -143,7 +173,7 @@ def _new_job():
     job_id = uuid.uuid4().hex
     with JOBS_LOCK:
         JOBS[job_id] = {
-            "status": "queued", "progress": 0.0, "image_base64": None, "prompt": "",
+            "status": "queued", "progress": 0.0, "image_base64": None, "video_base64": None, "prompt": "",
             "error": None, "cancel_event": threading.Event(), "prompt_id": None,
         }
     return job_id
@@ -205,7 +235,7 @@ def job_status(id: str):
             raise HTTPException(status_code=404, detail="job not found")
         return {
             "status": j["status"], "progress": j["progress"],
-            "image_base64": j["image_base64"], "prompt": j["prompt"], "error": j["error"],
+            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"],
         }
 
 
@@ -275,6 +305,80 @@ def job_image2(
                     pass
 
     _start_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+def _start_video_job(job_id, runner):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def prompt_id_cb(pid):
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["prompt_id"] = pid
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            video_bytes = runner(progress_cb, cancel_event, prompt_id_cb)
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["video_base64"] = base64.b64encode(video_bytes).decode("ascii")
+        except core.CancelledError:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/job/image2video")
+def job_image2video(
+    image: UploadFile = File(...),
+    prompt: str = Form(...),
+    duration: Optional[int] = Form(15),
+    seed: Optional[int] = Form(-1),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_image2video.generate(
+                image_path=path, prompt=prompt, duration=duration, seed=seed,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _start_video_job(job_id, runner)
     return {"job_id": job_id}
 
 

@@ -12,7 +12,11 @@ export default function AuthGate({ children }) {
   const [user, setUser] = useState(null)
   const [open, setOpen] = useState(false)
   const [view, setView] = useState('chat') // chat | imagegen
-  const [active, setActive] = useState('text2img') // 生圖功能(text2img|image1|image2)
+  const [active, setActive] = useState('image1') // 生圖功能, 預設單圖編輯
+  const isMobile = () => window.matchMedia('(max-width: 860px)').matches
+  const [menuOpen, setMenuOpen] = useState(() => !window.matchMedia('(max-width: 860px)').matches) // 手機預設收合
+  const [sidebarOpen, setSidebarOpen] = useState(true) // 由 App 回報: 清單面板開合
+  const [analysisOpen, setAnalysisOpen] = useState(true) // 由 App 回報: 分析面板開合
   const popRef = useRef(null)
 
   useEffect(() => {
@@ -20,6 +24,17 @@ export default function AuthGate({ children }) {
       setUser(user)
       setState(authed ? 'auth' : 'unauth')
     })
+  }, [])
+
+  // 接收 App 回報的面板開合狀態, 讓 status bar 的「清單/分析」按鈕同步高亮
+  useEffect(() => {
+    const onState = (e) => {
+      const d = e.detail || {}
+      if (typeof d.sidebarOpen === 'boolean') setSidebarOpen(d.sidebarOpen)
+      if (typeof d.analysisOpen === 'boolean') setAnalysisOpen(d.analysisOpen)
+    }
+    window.addEventListener('linechat-panel-state', onState)
+    return () => window.removeEventListener('linechat-panel-state', onState)
   }, [])
 
   // 點 popover 外部關閉
@@ -51,27 +66,67 @@ export default function AuthGate({ children }) {
     <div className="auth-shell">
       <div className="auth-statusbar">
         {authed && view === 'imagegen' ? (
-          <div className="gen-tabs" role="tablist">
-            {FUNCTIONS.map((f) => (
-              <button
-                key={f.id}
-                role="tab"
-                aria-selected={active === f.id}
-                className={'gen-tab' + (active === f.id ? ' active' : '')}
-                onClick={() => setActive(f.id)}
-                title={f.desc}
-              >
-                <span className="gen-tab-icon">{f.icon}</span>
-                <span className="gen-tab-label">{f.label}</span>
-              </button>
-            ))}
+          <div className="gen-statusbar">
+            <button
+              className={'gen-menubtn' + (menuOpen ? ' open' : '')}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-expanded={menuOpen}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+              <span>選擇功能</span>
+            </button>
+            <span className="gen-title">模型生圖(影片)</span>
           </div>
         ) : (
-          <div className="auth-brand">LINE 聊天紀錄</div>
+          <div className="chat-statusbar">
+            <button
+              className={'chat-status-btn' + (sidebarOpen ? ' active' : '')}
+              onClick={() => window.dispatchEvent(new Event('linechat-toggle-sidebar'))}
+              aria-pressed={sidebarOpen}
+              title="開合歷史聊天清單"
+            >
+              清單
+            </button>
+            <span className="auth-brand">LINE 聊天紀錄</span>
+            <button
+              className={'chat-status-btn' + (analysisOpen ? ' active' : '')}
+              onClick={() => window.dispatchEvent(new Event('linechat-toggle-analysis'))}
+              aria-pressed={analysisOpen}
+              title="開合聊天紀錄分析"
+            >
+              分析
+            </button>
+          </div>
         )}
       </div>
 
       <div className="auth-body">
+        {authed && view === 'imagegen' && (
+          <>
+            {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
+            <div className={'gen-drawer' + (menuOpen ? ' open' : '')} role="menu">
+              <div className="gen-drawer-title">生圖功能</div>
+              {FUNCTIONS.map((f) => (
+                <button
+                  key={f.id}
+                  role="menuitem"
+                  className={'gen-item' + (active === f.id ? ' active' : '')}
+                  onClick={() => { setActive(f.id); if (isMobile()) setMenuOpen(false) }}
+                >
+                  <span className="gen-item-icon">{f.icon}</span>
+                  <span className="gen-item-text">
+                    <span className="gen-item-label">{f.label}</span>
+                    <span className="gen-item-desc">{f.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
         <nav className="auth-dock">
           <div className="auth-dock-top">
             <button

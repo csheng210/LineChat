@@ -128,6 +128,8 @@ function App() {
   const queryRef = useRef(query) // 供輪詢閉包讀取「目前」搜尋字(避免捕獲初始值)
   accountRef.current = account
   queryRef.current = query
+  const analysisOpenRef = useRef(analysisOpen) // 供 status bar 事件閉包讀取最新開合狀態
+  analysisOpenRef.current = analysisOpen
 
   // 斷點切換: 進入行動版把兩側面板收合, 回到桌面則張開
   useEffect(() => {
@@ -164,6 +166,27 @@ function App() {
     window.addEventListener('linechat-home', onHome)
     return () => window.removeEventListener('linechat-home', onHome)
   }, [isMobile])
+
+  // status bar 的「清單/分析」按鈕透過自訂事件驅動面板開合(按鈕在 AuthGate status bar)
+  useEffect(() => {
+    const onToggleSidebar = () => setSidebarOpen((v) => !v)
+    const onToggleAnalysis = () => {
+      const next = !analysisOpenRef.current
+      setAnalysisOpen(next)
+      if (next && isMobile) setPickRange(true)
+    }
+    window.addEventListener('linechat-toggle-sidebar', onToggleSidebar)
+    window.addEventListener('linechat-toggle-analysis', onToggleAnalysis)
+    return () => {
+      window.removeEventListener('linechat-toggle-sidebar', onToggleSidebar)
+      window.removeEventListener('linechat-toggle-analysis', onToggleAnalysis)
+    }
+  }, [isMobile])
+
+  // 面板開合狀態回報給 status bar(讓「清單/分析」按鈕顯示高亮)
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('linechat-panel-state', { detail: { sidebarOpen, analysisOpen } }))
+  }, [sidebarOpen, analysisOpen])
 
   // 帳號下拉選項: 從後端的宅數據派生, 新壞帳號會自動出現
   useEffect(() => {
@@ -449,13 +472,6 @@ function App() {
     }
   }
 
-  // 開合右側分析面板; 行動版張開時順帶把聊天紀錄切成可選取狀態
-  function toggleAnalysis() {
-    const next = !analysisOpen
-    setAnalysisOpen(next)
-    if (next && isMobile) setPickRange(true)
-  }
-
   function closeOverlays() {
     setSidebarOpen(false)
     setAnalysisOpen(false)
@@ -685,14 +701,6 @@ function App() {
   return (
     <div className="app-root">
       <header className="topbar">
-        <button
-          className={'panel-toggle' + (sidebarOpen ? ' active' : '')}
-          onClick={() => setSidebarOpen((v) => !v)}
-          aria-pressed={sidebarOpen}
-          title="開合歷史聊天清單"
-        >
-          清單
-        </button>
         <select
           className="sync-days"
           value={syncRange}
@@ -725,14 +733,6 @@ function App() {
         {syncStatusText && (
           <span className={'sync-status ' + syncTone}>{syncStatusText}</span>
         )}
-        <button
-          className={'panel-toggle analysis-toggle-btn' + (analysisOpen ? ' active' : '')}
-          onClick={toggleAnalysis}
-          aria-pressed={analysisOpen}
-          title="開合聊天紀錄分析"
-        >
-          分析
-        </button>
       </header>
       <div className="app">
       {sidebarOpen && (

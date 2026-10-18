@@ -32,5 +32,15 @@ export const FUNCTIONS = [
         <rect x="9" y="9" width="12" height="12" rx="2" />
       </svg>
     ),
+  },  {
+    id: 'image2video',
+    label: '圖生影片',
+    desc: '一張圖 + 提示詞, 產出一段影片',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="16" rx="2" />
+        <path d="m10 9 5 3-5 3z" />
+      </svg>
+    ),
   },
 ]

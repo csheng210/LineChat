@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 
-// ComfyUI 生圖頁面: 左側功能清單(三個端點), 右側依選取功能產生表單與結果。
+// ComfyUI 生圖/生影片頁面: 功能按鈕在 status bar(AuthGate), 此處依 active 產生表單與結果。
 //   經 Vite proxy /comfy/* -> ComfyAPI(FastAPI)。
-//   生成採非同步任務: POST /comfy/job/* 回 job_id, 前端輪詢 /comfy/job?id= 更新進度條, 完成顯示圖。
+//   生成採非同步任務: POST /comfy/job/* 回 job_id, 前端輪詢 /comfy/job?id= 更新進度條, 完成顯示圖/影片。
 //   停止: POST /comfy/job/cancel?id= 中斷 ComfyUI 當前執行, 輪詢到 cancelled 顯示已停止。
 const COMFY = '/comfy'
 
@@ -20,6 +20,7 @@ export default function ImageGen({ active }) {
   const [width, setWidth] = useState(1024)
   const [height, setHeight] = useState(1024)
   const [seed, setSeed] = useState(-1)
+  const [duration, setDuration] = useState(8) // 圖生影片秒數
   const [image1, setImage1] = useState(null) // File
   const [image2, setImage2] = useState(null) // File
   const [preview1, setPreview1] = useState('')
@@ -31,11 +32,12 @@ export default function ImageGen({ active }) {
   const [cancelling, setCancelling] = useState(false)
   const [stopped, setStopped] = useState(false)
   const [error, setError] = useState('')
-  const [result, setResult] = useState(null) // { image: dataURL, prompt }
+  const [result, setResult] = useState(null) // { image, prompt } 或 { video }
 
   const jobRef = useRef(null) // 目前任務 id(供停止按鈕使用)
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
+  const isVideo = active === 'image2video'
 
   function resetResult() {
     setResult(null)
@@ -64,6 +66,7 @@ export default function ImageGen({ active }) {
     if (!prompt.trim()) return '請輸入提示詞'
     if (active === 'image1' && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
+    if (active === 'image2video' && !image1) return '請選擇輸入圖'
     return ''
   }
 
@@ -83,7 +86,7 @@ export default function ImageGen({ active }) {
   // 輪詢任務進度, 直到 done / cancelled / error / 逾時。
   async function pollJob(jobId) {
     const start = Date.now()
-    const maxMs = 360000 // 6 分鐘上限
+    const maxMs = 1800000 // 30 分鐘上限(影片生成較久)
     while (Date.now() - start < maxMs) {
       await new Promise((r) => setTimeout(r, 1000))
       const res = await fetch(COMFY + '/job?id=' + encodeURIComponent(jobId))
@@ -92,6 +95,7 @@ export default function ImageGen({ active }) {
       const p = typeof data.progress === 'number' ? data.progress : 0
       setProgress(p)
       if (data.status === 'done') {
+        if (data.video_base64) return { video: 'data:video/mp4;base64,' + data.video_base64 }
         if (!data.image_base64) throw new Error('後端未回傳圖片')
         return { image: 'data:image/png;base64,' + data.image_base64, prompt: data.prompt || '' }
       }
@@ -103,7 +107,7 @@ export default function ImageGen({ active }) {
       if (data.status === 'error') throw new Error(data.error || '生成失敗')
       setPhase(cancelling ? '停止中…' : data.status === 'queued' ? '排隊中…' : '生成中 ' + Math.round(p * 100) + '%')
     }
-    throw new Error('生成逾時（等待超過 360 秒）')
+    throw new Error('生成逾時（等待超過上限）')
   }
 
   async function generate() {
@@ -128,15 +132,21 @@ export default function ImageGen({ active }) {
         const form = new FormData()
         form.append('prompt', prompt.trim())
         if (seed !== '' && seed != null) form.append('seed', String(Number(seed)))
-        if (width !== '' && width != null) form.append('width', String(Number(width)))
-        if (height !== '' && height != null) form.append('height', String(Number(height)))
-        if (active === 'image1') {
+        if (active === 'image2video') {
+          form.append('duration', String(Number(duration)))
           form.append('image', image1)
-          res = await fetch(COMFY + '/job/image1', { method: 'POST', body: form })
+          res = await fetch(COMFY + '/job/image2video', { method: 'POST', body: form })
         } else {
-          form.append('image1', image1)
-          form.append('image2', image2)
-          res = await fetch(COMFY + '/job/image2', { method: 'POST', body: form })
+          if (width !== '' && width != null) form.append('width', String(Number(width)))
+          if (height !== '' && height != null) form.append('height', String(Number(height)))
+          if (active === 'image1') {
+            form.append('image', image1)
+            res = await fetch(COMFY + '/job/image1', { method: 'POST', body: form })
+          } else {
+            form.append('image1', image1)
+            form.append('image2', image2)
+            res = await fetch(COMFY + '/job/image2', { method: 'POST', body: form })
+          }
         }
       }
       const data = await res.json().catch(() => ({}))
@@ -157,19 +167,24 @@ export default function ImageGen({ active }) {
     }
   }
 
-  // 儲存生成結果: dataURL 轉為 PNG 下載。
-  function saveImage() {
-    if (!result || !result.image) return
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19)
-    const a = document.createElement("a")
-    a.href = result.image
-    a.download = active + "_" + stamp + ".png"
+  // 儲存生成結果: dataURL 轉為檔案下載(圖片 PNG / 影片 MP4)。
+  function saveResult() {
+    if (!result) return
+    const video = !!result.video
+    const src = video ? result.video : result.image
+    if (!src) return
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const a = document.createElement('a')
+    a.href = src
+    a.download = active + '_' + stamp + (video ? '.mp4' : '.png')
     document.body.appendChild(a)
     a.click()
     a.remove()
   }
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
+  const showDuration = active === 'image2video' // 圖生影片才顯示秒數
+  const showImages = active === 'image1' || active === 'image2' || active === 'image2video'
   const pct = Math.round(progress * 100)
 
   return (
@@ -181,10 +196,12 @@ export default function ImageGen({ active }) {
         </header>
 
         <div className="gen-form">
-          {(active === 'image1' || active === 'image2') && (
+          {showImages && (
             <div className="gen-images">
               <label className="gen-upload">
-                <span className="gen-upload-label">圖一{active === 'image2' ? '（長寬依據）' : ''}</span>
+                <span className="gen-upload-label">
+                  {active === 'image2video' ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                </span>
                 <input
                   type="file"
                   accept="image/*"
@@ -219,7 +236,7 @@ export default function ImageGen({ active }) {
             <textarea
               className="gen-textarea"
               rows={3}
-              placeholder="例: 將圖片的沙發換成紅色"
+              placeholder={isVideo ? '例: 鏡頭緩慢推進，抱枕輕輕晃動' : '例: 將圖片的沙發換成紅色'}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
@@ -234,6 +251,19 @@ export default function ImageGen({ active }) {
               <label className="gen-num">
                 <span className="gen-field-label">高</span>
                 <input type="number" min="64" max="4096" value={height} onChange={(e) => setHeight(e.target.value)} />
+              </label>
+              <label className="gen-num">
+                <span className="gen-field-label">種子(-1 隨機)</span>
+                <input type="number" value={seed} onChange={(e) => setSeed(e.target.value)} />
+              </label>
+            </div>
+          )}
+
+          {showDuration && (
+            <div className="gen-row">
+              <label className="gen-num">
+                <span className="gen-field-label">秒數</span>
+                <input type="number" min="5" max="60" value={duration} onChange={(e) => setDuration(e.target.value)} />
               </label>
               <label className="gen-num">
                 <span className="gen-field-label">種子(-1 隨機)</span>
@@ -271,9 +301,13 @@ export default function ImageGen({ active }) {
           {result ? (
             <>
               <div className="gen-result-actions">
-                <button className="gen-save" onClick={saveImage}>儲存圖片</button>
+                <button className="gen-save" onClick={saveResult}>儲存{result.video ? '影片' : '圖片'}</button>
               </div>
-              <img className="gen-result-img" src={result.image} alt="生成結果" />
+              {result.video ? (
+                <video className="gen-result-video" src={result.video} controls autoPlay loop playsInline />
+              ) : (
+                <img className="gen-result-img" src={result.image} alt="生成結果" />
+              )}
               {result.prompt && (
                 <div className="gen-result-prompt">
                   <div className="gen-result-prompt-title">輸出提示詞</div>

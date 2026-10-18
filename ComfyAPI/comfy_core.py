@@ -152,7 +152,7 @@ def clean_prompt(text: str) -> str:
     return text.strip()
 
 
-def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
+def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None, output_key="images"):
     """排隊工作流並等待完成，回傳 history 的 outputs 字典。失敗丟例外。"""
     client_id = str(uuid.uuid4())
     state = {"prompt_id": None, "done": False, "error": None, "cancelled": False}
@@ -219,7 +219,8 @@ def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print, pro
         hist = requests.get(f"{HTTP_BASE}/history/{state['prompt_id']}").json()
         entry = hist.get(state["prompt_id"]) or {}
         outs = entry.get("outputs", {})
-        if outs.get(save_node, {}).get("images") and outs.get(preview_node):
+        ready = bool(outs.get(save_node, {}).get(output_key))
+        if ready and (preview_node is None or outs.get(preview_node)):
             break
         time.sleep(0.5)
     return entry.get("outputs", {})
@@ -236,3 +237,17 @@ def get_output_image_bytes(outputs: dict, save_node: str) -> bytes:
     if not images:
         raise RuntimeError("history 沒有輸出圖片")
     return fetch_image(images[0])
+
+def get_output_video_bytes(outputs: dict, save_node: str) -> bytes:
+    """從 outputs 取輸出影片 bytes。SaveVideo 可能放在 videos 或 images 鍵(檔名 .mp4)。"""
+    def pick(d):
+        return d.get("videos") or d.get("images")
+    vids = pick(outputs.get(save_node, {}))
+    if not vids:
+        for out in outputs.values():
+            if pick(out):
+                vids = pick(out)
+                break
+    if not vids:
+        raise RuntimeError("history 沒有輸出影片")
+    return fetch_image(vids[0])
