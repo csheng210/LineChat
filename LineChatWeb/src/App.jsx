@@ -283,7 +283,8 @@ function App() {
   }, [selected, detailNonce])
 
   async function handleSend(textArg) {
-    const text = String(textArg ?? draft).trim()
+    // textArg 為字串時直接採用(直接回覆用); 非字串(如事件物件)則退回用輸入框 draft
+    const text = String(typeof textArg === "string" ? textArg : draft).trim()
     if (!detail || !text || sending) return
     setSending(true)
     setSendMsg(null)
@@ -834,12 +835,13 @@ function App() {
               <textarea
                 className="composer-input"
                 value={draft}
-                placeholder={'輸入要傳送给 ' + detail.person + ' 的訊息（Ctrl+Enter 傳送）'}
+                placeholder={'輸入要傳送给 ' + detail.person + ' 的訊息（Enter 傳送，Shift+Enter 換行）'}
                 rows={2}
                 disabled={sending}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  // Enter 直接傳送; Shift+Enter 保留預設換行
+                  if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault()
                     handleSend()
                   }
@@ -847,7 +849,7 @@ function App() {
               />
               <button
                 className="composer-send"
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={sending || !draft.trim()}
               >
                 {sending ? '傳送中…' : '傳送'}
