@@ -98,6 +98,9 @@ class SyncTriggerHandler(TopicHandler):
     def flush_due(self) -> None:
         if self._pending <= 0:
             return
+        # _pending > 0 時 ingest 必已設定時間戳; 守衛 None 讓型別收窄, 避免 float - None 運算。
+        if self._first_at is None or self._last_at is None:
+            return
         now = time.monotonic()
         debounce_hit = (now - self._last_at) * 1000 >= config.SYNC_DEBOUNCE_MS
         maxbatch_hit = (now - self._first_at) * 1000 >= config.SYNC_MAX_BATCH_MS
