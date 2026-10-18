@@ -100,6 +100,8 @@ app.post('/send', async (req, reply) => {
         );
       } finally {
         browser.release();
+        // 傳送完成立即關閉瀏覽器(下次用到會自動延遲重啟, 不影響登入 session 重用)。
+        await browser.shutDown();
       }
     });
     return reply.code(ok ? 200 : 502).send(
