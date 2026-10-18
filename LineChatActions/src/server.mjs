@@ -297,6 +297,11 @@ function deriveClassification(a) {
 function safeChatName(name) {
   return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "analysis";
 }
+// 正規化聊天檔名: 去掉日期段 (YYYY_MM_DD), 讓同一民宿+客人跨日期的除錯檔都能配對。
+//   檔名格式: <民宿>-<YYYY_MM_DD>-<客人>; 同步/合併會使日期段漂移, 精確前綴比對會漏抓。
+function chatMatchKey(safeName) {
+  return safeName.replace(/-\d{4}_\d{2}_\d{2}-/, "-");
+}
 // 檔名尾端時間戳 _YYYYMMDD_HHMMSS -> 本地 Date(供 savedAt)。
 function stampToDate(stamp) {
   const m = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(stamp);
@@ -431,9 +436,13 @@ app.get('/analysis', async (req, reply) => {
   if (chatFile.toLowerCase().endsWith('.json')) chatFile = chatFile.slice(0, -5);
   const dir = CONFIG.ANALYSIS_DIR;
   if (!fs.existsSync(dir)) return reply.send({ ok: true, found: false });
-  const prefix = safeChatName(chatFile) + '_';
+  const chatKey = chatMatchKey(safeChatName(chatFile));
   try {
-    const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json') && f.startsWith(prefix));
+    const files = fs.readdirSync(dir).filter((f) => {
+      if (!f.toLowerCase().endsWith('.json')) return false;
+      const base = f.replace(/_\d{8}_\d{6}\.json$/i, '');
+      return chatMatchKey(safeChatName(base)) === chatKey;
+    });
     const parsed = [];
     for (const f of files) {
       try {
