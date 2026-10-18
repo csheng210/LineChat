@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { checkAuth, login, logout } from './auth.js'
+import ImageGen from './ImageGen.jsx'
+import { FUNCTIONS } from './imagegenFunctions.jsx'
 import './AuthGate.css'
 
-// 授權閘門: 頂端 status bar(僅品牌) + 左側 docker bar(上=首頁, 下=帳號登入/登出)。
+// 授權閘門: 頂端 status bar(僅品牌) + 左側 docker bar(上=首頁/生圖, 下=帳號登入/登出)。
 //   帳號圖示在 docker bar 最下方, 點開 popover 顯示登入狀態與登入/登出(未登入含登入表單)。
+//   view: 'chat'=主聊天 App(children) | 'imagegen'=ComfyUI 生圖頁面。
 export default function AuthGate({ children }) {
   const [state, setState] = useState('loading') // loading | unauth | auth
   const [user, setUser] = useState(null)
   const [open, setOpen] = useState(false)
+  const [view, setView] = useState('chat') // chat | imagegen
+  const [active, setActive] = useState('text2img') // 生圖功能(text2img|image1|image2)
   const popRef = useRef(null)
 
   useEffect(() => {
@@ -36,25 +41,64 @@ export default function AuthGate({ children }) {
     setOpen(false)
   }
 
-  // 首頁: 通知主 App 收合 overlay 並回到清單頂端
+  // 首頁: 切回主 App, 並通知收合 overlay 並回到清單頂端
   function goHome() {
+    setView('chat')
     window.dispatchEvent(new Event('linechat-home'))
   }
 
   return (
     <div className="auth-shell">
       <div className="auth-statusbar">
-        <div className="auth-brand">LINE 聊天紀錄</div>
+        {authed && view === 'imagegen' ? (
+          <div className="gen-tabs" role="tablist">
+            {FUNCTIONS.map((f) => (
+              <button
+                key={f.id}
+                role="tab"
+                aria-selected={active === f.id}
+                className={'gen-tab' + (active === f.id ? ' active' : '')}
+                onClick={() => setActive(f.id)}
+                title={f.desc}
+              >
+                <span className="gen-tab-icon">{f.icon}</span>
+                <span className="gen-tab-label">{f.label}</span>
+              </button>
+            ))}
+          </div>
+        ) : (
+          <div className="auth-brand">LINE 聊天紀錄</div>
+        )}
       </div>
 
       <div className="auth-body">
         <nav className="auth-dock">
-          <button className="auth-dock-btn" onClick={goHome} title="首頁" aria-label="首頁">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </button>
+          <div className="auth-dock-top">
+            <button
+              className={'auth-dock-btn' + (view === 'chat' ? ' on' : '')}
+              onClick={goHome}
+              title="首頁"
+              aria-label="首頁"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                <polyline points="9 22 9 12 15 12 15 22" />
+              </svg>
+            </button>
+
+            <button
+              className={'auth-dock-btn' + (view === 'imagegen' ? ' on' : '')}
+              onClick={() => setView('imagegen')}
+              title="生圖"
+              aria-label="生圖"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="9" cy="9" r="2" />
+                <path d="m21 15-3.5-3.5L9 20" />
+              </svg>
+            </button>
+          </div>
 
           <div className="auth-account" ref={popRef}>
             <button
@@ -103,7 +147,7 @@ export default function AuthGate({ children }) {
               </div>
             </div>
           )}
-          {state === 'auth' && children}
+          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : children)}
         </div>
       </div>
     </div>

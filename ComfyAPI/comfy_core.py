@@ -41,6 +41,23 @@ SEED_MAX = 2 ** 32 - 1
 THINK_MARKER = chr(60) + "|124|124|" + chr(62)  # VLM 思考區塊結尾記號
 
 
+class CancelledError(RuntimeError):
+    """任務被使用者取消。"""
+
+
+def interrupt_comfyui(prompt_id=None):
+    """中斷 ComfyUI 當前執行; 若給 prompt_id 並一併從佇列移除(尚未開始的任務)。"""
+    try:
+        requests.post(f"{HTTP_BASE}/interrupt")
+    except requests.RequestException:
+        pass
+    if prompt_id:
+        try:
+            requests.post(f"{HTTP_BASE}/queue/delete", json={"prompt_id": prompt_id})
+        except requests.RequestException:
+            pass
+
+
 def image_size_from_bytes(data: bytes):
     """從圖片 bytes 解析 (width, height)；解析不到回 None。支援 PNG/JPEG/WebP/GIF/BMP。"""
     try:
@@ -135,10 +152,10 @@ def clean_prompt(text: str) -> str:
     return text.strip()
 
 
-def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print):
+def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """排隊工作流並等待完成，回傳 history 的 outputs 字典。失敗丟例外。"""
     client_id = str(uuid.uuid4())
-    state = {"prompt_id": None, "done": False, "error": None}
+    state = {"prompt_id": None, "done": False, "error": None, "cancelled": False}
 
     def on_message(ws, message):
         if not message:
@@ -149,7 +166,22 @@ def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print):
             return
         mtype = msg.get("type")
         data = msg.get("data", {})
-        if mtype == "executing":
+        if cancel_event is not None and cancel_event.is_set():
+            state["cancelled"] = True
+            state["done"] = True
+            ws.close()
+            return
+        if mtype == "execution_interrupted":
+            state["cancelled"] = True
+            state["done"] = True
+            ws.close()
+        elif mtype == "progress":
+            if progress_cb:
+                try:
+                    progress_cb(int(data.get("value", 0)), int(data.get("max", 0)))
+                except (TypeError, ValueError):
+                    pass
+        elif mtype == "executing":
             if data.get("node") is None and data.get("prompt_id") == state["prompt_id"]:
                 state["done"] = True
                 ws.close()
@@ -167,12 +199,16 @@ def run_workflow(prompt: dict, save_node: str, preview_node: str, log=print):
             return
         res = r.json()
         state["prompt_id"] = res.get("prompt_id")
+        if prompt_id_cb:
+            prompt_id_cb(state["prompt_id"])
         log(f"prompt_id = {state['prompt_id']} queue number = {res.get('number')}")
 
     ws_url = f"{WS_BASE}/ws?clientId={client_id}"
     ws = websocket.WebSocketApp(ws_url, on_open=on_open, on_message=on_message)
     ws.run_forever(ping_interval=20)
 
+    if state.get("cancelled"):
+        raise CancelledError("任務已取消")
     if state["error"]:
         raise RuntimeError("ComfyUI 執行錯誤: " + state["error"])
     if not state["done"]:

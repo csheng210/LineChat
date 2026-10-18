@@ -3,11 +3,12 @@ import { authPlugin } from './auth-plugin.js'
 import { defineConfig, loadEnv } from 'vite'
 
 // https://vite.dev/config/
-// proxy target 由 .env 讀取(VITE_API_TARGET / VITE_ACTIONS_TARGET), 未設則沿用預設本機端點。
+// proxy target 由 .env 讀取(VITE_API_TARGET / VITE_ACTIONS_TARGET / VITE_COMFY_TARGET), 未設則沿用預設本機端點。
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8201'
   const actionsTarget = env.VITE_ACTIONS_TARGET || 'http://127.0.0.1:8202'
+  const comfyTarget = env.VITE_COMFY_TARGET || 'http://127.0.0.1:8000'
   // 外部網域存取: VITE_DEV_ALLOWED_HOSTS 逗號分隔(例: a.example.com,b.example.com); 設 true 允許全部(不建議)。
   const allowedHostsRaw = (env.VITE_DEV_ALLOWED_HOSTS || '').trim()
   const allowedHosts = allowedHostsRaw === 'true' ? true : allowedHostsRaw ? allowedHostsRaw.split(',').map((h) => h.trim()).filter(Boolean) : undefined
@@ -33,6 +34,13 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/actions/, ''),
         },
+        // 生圖: /comfy/* -> ComfyAPI (FastAPI, 包裝 ComfyUI 生圖腳本)
+        // 去掉 /comfy 前綴後轉給服務(其路由為 /text2img, /image1/edit, /image2/edit, /health)。
+        '/comfy': {
+          target: comfyTarget,
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/comfy/, ''),
+        },
       },
     },
     preview: {
@@ -42,8 +50,8 @@ export default defineConfig(({ mode }) => {
       proxy: {
         '/api': { target: apiTarget, changeOrigin: true },
         '/actions': { target: actionsTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/actions/, '') },
+        '/comfy': { target: comfyTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/comfy/, '') },
       },
     },
   }
 })
-

@@ -63,7 +63,7 @@ def build_workflow(name1, name2, prompt_text, width, height, seed, wf_path):
 
 
 def generate(image1, image2, prompt, width=None, height=None, seed=-1,
-             workflow=None, output=None, return_bytes=False, log=print):
+             workflow=None, output=None, return_bytes=False, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """雙圖編輯。回傳 (輸出圖 bytes, 輸出提示詞)；若給 output 則同時存檔。"""
     wf_path = Path(workflow) if workflow else DEFAULT_WORKFLOW
     if not wf_path.is_file():
@@ -85,7 +85,7 @@ def generate(image1, image2, prompt, width=None, height=None, seed=-1,
     wf = build_workflow(name1, name2, prompt, width, height, seed, wf_path)
     log(f"workflow={wf_path.name}, image1={name1}, image2={name2}, size={width}x{height}, seed={seed}")
 
-    outputs = core.run_workflow(wf, NODE_SAVE_IMAGE, NODE_PROMPT_PREVIEW, log=log)
+    outputs = core.run_workflow(wf, NODE_SAVE_IMAGE, NODE_PROMPT_PREVIEW, log=log, progress_cb=progress_cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
     image_bytes = core.get_output_image_bytes(outputs, NODE_SAVE_IMAGE)
     out_prompt = core.clean_prompt(core.extract_text(outputs.get(NODE_PROMPT_PREVIEW, {})))
 
