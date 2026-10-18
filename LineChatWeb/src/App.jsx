@@ -282,8 +282,8 @@ function App() {
     }
   }, [selected, detailNonce])
 
-  async function handleSend() {
-    const text = draft.trim()
+  async function handleSend(textArg) {
+    const text = String(textArg ?? draft).trim()
     if (!detail || !text || sending) return
     setSending(true)
     setSendMsg(null)
@@ -489,7 +489,10 @@ function App() {
     if (!suggest) return
     if (suggest.skipped) setSuggestError(suggest.reason || '未進行建議回覆')
     else if (suggest.error) setSuggestError(suggest.error)
-    else setSuggestResult(suggest)
+    else {
+      setSuggestResult(suggest)
+      setAnalysisTab('reply') // 有建議回覆資料時, 預設顯示建議回覆 Tab
+    }
   }
 
   // 載入 chat_vllm_suggest 還原的歷史清單, 預設顯示最新一則。
@@ -661,6 +664,22 @@ function App() {
     setDraft(suggestResult.reply)
     if (isMobile) setAnalysisOpen(false)
   }
+
+  // 直接回覆: 把建議回覆內容貼上並立即傳送(等同填入後按傳送)
+  function sendReplyDirect() {
+    if (!suggestResult || !suggestResult.reply || sending) return
+    handleSend(suggestResult.reply)
+  }
+
+  // 客人端最後一則有文字的訊息: 供建議回覆頂端顯示「詢問的最後訊息」
+  const lastCustomerMsg = (() => {
+    const msgs = detail && Array.isArray(detail.messages) ? detail.messages : []
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m && m.sender !== detail.account && m.content && String(m.content).trim()) return m
+    }
+    return null
+  })()
 
   return (
     <div className="app-root">
@@ -941,6 +960,12 @@ function App() {
               ) : (
                 <>
                   <div className="suggest-content">
+                    {!suggestLoading && suggestResult && suggestResult.parse_ok !== false && lastCustomerMsg && (
+                      <div className="suggest-question">
+                        <div className="analysis-section-title">詢問的最後訊息</div>
+                        <p className="suggest-question-text">{lastCustomerMsg.content}</p>
+                      </div>
+                    )}
                     {suggestLoading && (
                       <p className="analysis-hint">推算中…（呼叫 vLLM，可能需數十秒）</p>
                     )}
@@ -996,7 +1021,10 @@ function App() {
                   </div>
                   {!suggestLoading && suggestResult && suggestResult.parse_ok !== false && (
                     <footer className="suggest-actions">
-                      <button className="suggest-btn primary" onClick={fillComposer}>
+                      <button className="suggest-btn primary" onClick={sendReplyDirect} disabled={sending} title="把建議回覆貼上並立即傳送">
+                        {sending ? '傳送中…' : '直接回覆'}
+                      </button>
+                      <button className="suggest-btn" onClick={fillComposer}>
                         填入訊息框
                       </button>
                       <button className="suggest-btn" onClick={copyReply}>
