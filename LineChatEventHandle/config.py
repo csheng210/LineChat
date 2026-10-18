@@ -76,6 +76,9 @@ CHAT_LINE_MESSAGE_UNREAD_DIR = Path(
 )
 # chat_history 目錄(同步寫入的聊天紀錄; 未讀紀錄以 Unread=true 標記)。
 CHAT_HISTORY_DIR = DATA_DIR / "chat_history"
+# 「分析＋建議回覆」結果存檔目錄(與 LineChatActions 共用同一份 Line-Data),
+# 供前端清單點選時以 GET /analysis 回載。可用 LINE_CHAT_ANALYSIS_DIR 覆蓋。
+ANALYSIS_DIR = Path(os.environ.get("LINE_CHAT_ANALYSIS_DIR") or (DATA_DIR / "chat_analysis"))
 SYNC_DEBOUNCE_MS = _int("SYNC_DEBOUNCE_MS", 15000)
 SYNC_MAX_BATCH_MS = _int("SYNC_MAX_BATCH_MS", 120000)
 SYNC_DAYS = _int("SYNC_DAYS", 2)

@@ -83,6 +83,52 @@ def _parse_pairs(value):
     return pairs
 
 
+def _save_analysis_suggest(chat_file, result):
+    """把建議回覆寫入 ANALYSIS_DIR/<name>/<時間戳>.json, 格式符合前端 GET /analysis。
+
+    前端 chat.id = 含 .json 的檔名, 讀取時會去 .json -> 目錄名 = chat_file 去 .json。
+    降級: 任何失敗只印日誌, 不讓主迴圈崩潰(對齊本檔既有風格)。
+    """
+    try:
+        if not chat_file:
+            return
+        name = Path(chat_file).stem
+        suggest = {
+            "reply": result.get("reply", ""),
+            "basis": result.get("basis", []),
+            "caveat": result.get("caveat"),
+            "parse_ok": result.get("parse_ok"),
+            "references": result.get("references", []),
+            "model": result.get("model"),
+            "source": result.get("source") or chat_file,
+            "chat_file": chat_file,
+            "savedBy": "events-line-reply-suggest",
+        }
+        for k in ("raw", "debug_file", "range"):
+            if result.get(k):
+                suggest[k] = result.get(k)
+        now = datetime.now().astimezone()
+        stamp = now.strftime("%Y%m%d_%H%M%S")
+        d = config.ANALYSIS_DIR / name
+        d.mkdir(parents=True, exist_ok=True)
+        out = d / (stamp + ".json")
+        n = 2
+        while out.exists():
+            out = d / (stamp + "-" + str(n) + ".json")
+            n += 1
+        payload = {
+            "savedAt": now.isoformat(timespec="seconds"),
+            "chatFile": name,
+            "analysis": None,
+            "suggest": suggest,
+            "range": result.get("range"),
+        }
+        out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"[reply-suggest] 已寫入分析存檔: {out}")
+    except Exception as e:
+        print(f"[reply-suggest] 寫入分析存檔失敗: {e}")
+
+
 class MessageReceviedHandler(TopicHandler):
     """events-line-message-recevied: 解析客人 -> 產出建議回覆 -> 發布 events-line-reply-suggest。"""
 
@@ -138,6 +184,8 @@ class MessageReceviedHandler(TopicHandler):
                 "error": result.get("error"),
             })
             print(f"[reply-suggest] {hotel}/{person} -> {result.get('chat_file')} reply={'Y' if result.get('reply') else 'N'}")
+            if result.get("chat_file") and result.get("reply"):
+                _save_analysis_suggest(result.get("chat_file"), result)
         self._publish({
             "source": "LineChatEventHandle",
             "at": datetime.now().astimezone().isoformat(timespec="seconds"),
