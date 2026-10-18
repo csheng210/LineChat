@@ -291,61 +291,46 @@ function deriveClassification(a) {
   return cls;
 }
 
-// 分析時間 -> 檔名時間戳(本地 YYYYMMDD_HHMMSS)。
-function analysisStamp(date) {
-  const p2 = (n) => String(n).padStart(2, '0');
-  return date.getFullYear() + p2(date.getMonth() + 1) + p2(date.getDate()) + '_' + p2(date.getHours()) + p2(date.getMinutes()) + p2(date.getSeconds());
+// 依 chat_vllm_suggest 目錄的除錯檔(chat_vllm_anlaysis.py / chat_vllm_suggest.py 每次執行都存檔),
+// 還原某組聊天紀錄的「分析」與「建議回覆」歷史, 供前端 GET /analysis 回載。
+//   檔名格式: <safe名>_<YYYYMMDD_HHMMSS>.json; 以 parsed_result 的欄位區分分析/建議。
+function safeChatName(name) {
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "analysis";
 }
-
-// 遷移舊格式: chat_analysis/<name>.json(單一 {analysis,suggest} 或 {history:[...]}) -> 拆成 <name>/<時間戳>.json, 舊檔改名 .legacy。
-function migrateLegacyAnalysis(name) {
-  const legacy = path.join(CONFIG.ANALYSIS_DIR, name + '.json');
-  if (!fs.existsSync(legacy)) return;
-  try {
-    const data = JSON.parse(fs.readFileSync(legacy, 'utf8'));
-    const dir = path.join(CONFIG.ANALYSIS_DIR, name);
-    fs.mkdirSync(dir, { recursive: true });
-    let entries = [];
-    if (Array.isArray(data.history)) entries = data.history;
-    else if (data.analysis) entries = [{ savedAt: data.savedAt || null, analysis: data.analysis, suggest: data.suggest ?? null, range: (data.analysis && data.analysis.range) || null }];
-    entries.forEach((e) => {
-      const d = e.savedAt ? new Date(e.savedAt) : new Date();
-      const stamp = analysisStamp(isNaN(d.getTime()) ? new Date() : d);
-      let outPath = path.join(dir, stamp + '.json');
-      for (let n = 2; fs.existsSync(outPath); n++) outPath = path.join(dir, stamp + '-' + n + '.json');
-      fs.writeFileSync(outPath, JSON.stringify({ savedAt: e.savedAt || null, chatFile: name, analysis: e.analysis, suggest: e.suggest ?? null, range: e.range ?? ((e.analysis && e.analysis.range) || null) }, null, 2), 'utf8');
-    });
-    fs.renameSync(legacy, legacy + '.legacy');
-    console.log(`[analyze-suggest] 遷移舊檔 -> ${dir} (${entries.length} 份)`);
-  } catch (e) {
-    console.error('[analyze-suggest] 遷移舊檔失敗:', (e && e.message) || e);
+// 檔名尾端時間戳 _YYYYMMDD_HHMMSS -> 本地 Date(供 savedAt)。
+function stampToDate(stamp) {
+  const m = /^(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})$/.exec(stamp);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+}
+// 一份 chat_vllm_suggest 除錯檔 -> { savedAt, stamp, kind, analysis?, suggest?, range }。
+function parseSuggestFile(fileName, data) {
+  const m = /_(\d{8}_\d{6})\.json$/i.exec(fileName);
+  const stamp = m ? m[1] : "";
+  const d = stampToDate(stamp);
+  const savedAt = d ? d.toISOString() : null;
+  const pr = (data && data.parsed_result) || {};
+  const range = (data && data.range) || null;
+  const isSuggest = ("reply" in pr) || ("basis" in pr) || ("caveat" in pr);
+  const isAnalysis = ("final_status" in pr) || ("summary" in pr) || ("classification" in pr);
+  const out = { savedAt, stamp, kind: isSuggest ? "suggest" : (isAnalysis ? "analysis" : "other"), range };
+  if (isAnalysis) {
+    out.analysis = {
+      parse_ok: pr.parse_ok, final_status: pr.final_status, pending_question: pr.pending_question,
+      summary: pr.summary, classification: pr.classification, top_category: pr.top_category,
+      range, raw: (pr.parse_ok === false ? (data.raw_text || "") : undefined),
+      debug_file: path.join(CONFIG.ANALYSIS_DIR, fileName),
+    };
   }
-}
-
-// 每次「分析＋建議」存成一個以分析時間命名的檔案: chat_analysis/<聊天紀錄名>/<時間戳>.json。
-//   同一組聊天紀錄、不同範圍 -> 各自一份檔案; 前端取最新並可前後導覽。
-function saveAnalysis(chatFile, analysis, suggest) {
-  try {
-    let name = path.basename(chatFile);
-    if (name.toLowerCase().endsWith('.json')) name = name.slice(0, -5);
-    const dir = path.join(CONFIG.ANALYSIS_DIR, name);
-    fs.mkdirSync(dir, { recursive: true });
-    migrateLegacyAnalysis(name);
-    const now = new Date();
-    let stamp = analysisStamp(now);
-    let outPath = path.join(dir, stamp + '.json');
-    for (let n = 2; fs.existsSync(outPath); n++) outPath = path.join(dir, stamp + '-' + n + '.json');
-    const payload = { savedAt: now.toISOString(), chatFile: name, analysis, suggest: suggest ?? null, range: (analysis && analysis.range) || null };
-    fs.writeFileSync(outPath, JSON.stringify(payload, null, 2), 'utf8');
-    console.log(`[analyze-suggest] 已存檔: ${outPath}`);
-  } catch (e) {
-    console.error('[analyze-suggest] 存檔失敗:', (e && e.message) || e);
+  if (isSuggest) {
+    out.suggest = {
+      parse_ok: pr.parse_ok, reply: pr.reply, basis: pr.basis, caveat: pr.caveat,
+      references: (data && data.references) || [], range,
+      raw: (pr.parse_ok === false ? (data.raw_text || "") : undefined),
+      debug_file: path.join(CONFIG.ANALYSIS_DIR, fileName),
+    };
   }
-}
-// 統一回 { analysis, suggest } 並落盤存檔。
-function sendSaved(reply, chatFile, analysis, suggest) {
-  saveAnalysis(chatFile, analysis, suggest);
-  return reply.send({ ok: true, result: { analysis, suggest } });
+  return out;
 }
 
 async function runAnalyzeSuggest(chatFile, startIndex, endIndex, mdPath) {
@@ -366,13 +351,11 @@ async function runAnalyzeSuggest(chatFile, startIndex, endIndex, mdPath) {
   // 2) 依分析結果決定是否/如何跑建議回覆
   if (analysis.parse_ok === false) {
     const sug = { skipped: true, reason: '分析無法解析模型回應，未進行建議回覆' };
-    saveAnalysis(chatFile, analysis, sug);
     return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
   }
   const cls = deriveClassification(analysis);
   if (cls.length === 0) {
     const sug = { skipped: true, reason: '未取得問題分類，未進行建議回覆' };
-    saveAnalysis(chatFile, analysis, sug);
     return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
   }
 
@@ -394,10 +377,8 @@ async function runAnalyzeSuggest(chatFile, startIndex, endIndex, mdPath) {
   if (sRun.code !== 200) {
     // 分析成功但建議回覆失敗: 仍回 200 + 分析結果並存檔, suggest 帶 error 供前端提示。
     const sug = { error: sRun.error, raw: sRun.raw };
-    saveAnalysis(chatFile, analysis, sug);
     return { ok: true, analysis, suggest: sug, result: { analysis, suggest: sug } };
   }
-  saveAnalysis(chatFile, analysis, sRun.result);
   return { ok: true, analysis, suggest: sRun.result, result: { analysis, suggest: sRun.result } };
 }
 
@@ -438,8 +419,8 @@ app.post('/analyze-suggest', async (req, reply) => {
   return reply.code(202).send({ ok: true, started: true, jobId: job.id });
 });
 
-// ---- 讀取「分析＋推論」存檔: GET /analysis?chatFile=... ----
-//   回 chat_analysis/<檔名> 內容({ savedAt, chatFile, analysis, suggest }); 無則 found:false。
+// ---- 讀取「分析＋推論」: GET /analysis?chatFile=... ----
+//   由 chat_vllm_suggest 目錄的除錯檔還原; 每份建議檔配對其之前最近的一份分析檔。
 app.get('/analysis', async (req, reply) => {
   const q = req.query || {};
   let chatFile = (q.chatFile || '').toString().trim();
@@ -448,20 +429,35 @@ app.get('/analysis', async (req, reply) => {
     return reply.code(400).send({ ok: false, error: '非法的檔名' });
   }
   if (chatFile.toLowerCase().endsWith('.json')) chatFile = chatFile.slice(0, -5);
-  const dir = path.join(CONFIG.ANALYSIS_DIR, chatFile);
-  // 向後相容: 舊的單一檔先遷移成每份時間戳檔案。
-  if (!fs.existsSync(dir) && fs.existsSync(path.join(CONFIG.ANALYSIS_DIR, chatFile + '.json'))) migrateLegacyAnalysis(chatFile);
+  const dir = CONFIG.ANALYSIS_DIR;
   if (!fs.existsSync(dir)) return reply.send({ ok: true, found: false });
+  const prefix = safeChatName(chatFile) + '_';
   try {
-    let history = [];
-    for (const f of fs.readdirSync(dir)) {
-      if (!f.toLowerCase().endsWith('.json')) continue;
+    const files = fs.readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.json') && f.startsWith(prefix));
+    const parsed = [];
+    for (const f of files) {
       try {
         const data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
-        history.push({ savedAt: data.savedAt || null, analysis: data.analysis, suggest: data.suggest ?? null, range: data.range ?? ((data.analysis && data.analysis.range) || null) });
+        const item = parseSuggestFile(f, data);
+        if (item.kind === 'analysis' || item.kind === 'suggest') parsed.push(item);
       } catch (e) { /* 略過損毀檔 */ }
     }
-    history.sort((a, b) => String(a.savedAt || '').localeCompare(String(b.savedAt || '')));
+    parsed.sort((a, b) => String(a.stamp).localeCompare(String(b.stamp)));
+    const analyses = parsed.filter((x) => x.kind === 'analysis');
+    const suggests = parsed.filter((x) => x.kind === 'suggest');
+    const history = [];
+    // 每份建議配對它之前(含同時間)最近的一份分析 -> 一則同時含分析+建議的歷史。
+    for (const s of suggests) {
+      const a = analyses.filter((x) => x.stamp <= s.stamp).slice(-1)[0] || null;
+      history.push({ savedAt: s.savedAt, analysis: a ? a.analysis : null, suggest: s.suggest, range: s.range || (a && a.range) || null });
+    }
+    // 沒有後續建議的分析(純分析)也列出來。
+    for (const a of analyses) {
+      if (!suggests.some((s) => s.stamp >= a.stamp)) {
+        history.push({ savedAt: a.savedAt, analysis: a.analysis, suggest: null, range: a.range || null });
+      }
+    }
+    history.sort((x, y) => String(x.savedAt || '').localeCompare(String(y.savedAt || '')));
     return reply.send({ ok: true, found: history.length > 0, chatFile, savedAt: history.length ? history[history.length - 1].savedAt : null, history });
   } catch (e) {
     return reply.code(500).send({ ok: false, error: '分析存檔解析失敗: ' + ((e && e.message) || e) });

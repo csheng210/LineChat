@@ -262,7 +262,7 @@ function App() {
     clearAnalysis()
     setPicked([])
     setPickRange(true)
-    // 清單對應的「分析＋推論」存檔(chat_analysis): 有就回載到分析結果與建議回覆兩個 Tab。
+    // 清單對應的「分析＋推論」(chat_vllm_suggest 除錯檔): 有就回載到分析結果與建議回覆兩個 Tab。
     getAnalysis(selected)
       .then((r) => { if (alive) applySavedAnalysis(r) })
       .catch(() => {})
@@ -479,7 +479,7 @@ function App() {
     setAnalysisIndex(-1)
   }
 
-  // 把 chat_analysis 存檔({ analysis, suggest })套到右側兩個 Tab(與即時跑完的填法一致)。
+  // 把一則歷史({ analysis, suggest })套到右側兩個 Tab(與即時跑完的填法一致)。
   // 把某一筆歷史({ analysis, suggest })套到右側兩個 Tab(與即時跑完的填法一致)。
   function applyHistoryEntry(entry) {
     clearAnalysisDisplay()
@@ -492,7 +492,7 @@ function App() {
     else setSuggestResult(suggest)
   }
 
-  // 載入 chat_analysis 存檔的歷史清單, 預設顯示最新一則(向後相容舊的單一格式)。
+  // 載入 chat_vllm_suggest 還原的歷史清單, 預設顯示最新一則。
   function applySavedAnalysis(res) {
     if (!res || !res.found) return
     let history = Array.isArray(res.history) ? res.history : []

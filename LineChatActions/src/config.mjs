@@ -59,8 +59,8 @@ export const CONFIG = {
   // 共享「資料」目錄(非程式碼耦合): LineChatAPI 讀這裡, 同步也寫這裡。
   CHAT_DIR: process.env.LINE_CHAT_HISTORY_DIR || path.join(DATA_DIR, 'chat_history'),
   MEDIA_DIR: process.env.LINE_CHAT_MEDIA_DIR || path.join(DATA_DIR, 'chat_media'),
-  // 「分析＋推論」結果存檔目錄(檔名與 chat_history 一致), 供清單點選時回載。
-  ANALYSIS_DIR: process.env.LINE_CHAT_ANALYSIS_DIR || path.join(DATA_DIR, 'chat_analysis'),
+  // 「分析＋建議回覆」來源目錄(chat_vllm_anlaysis.py / chat_vllm_suggest.py 每次執行的除錯檔), 供清單點選時回載。
+  ANALYSIS_DIR: process.env.LINE_CHAT_ANALYSIS_DIR || path.join(DATA_DIR, 'chat_vllm_suggest'),
   // 語意快取 db: 指向共用那份, 讓本服務與 root 腳本共用同一快取。
   CACHE_DB: process.env.LINE_CHAT_CACHE_DB || path.join(DATA_DIR, 'chat-history-img-url-cache.db'),
   // 問題分類 md(分析/建議回覆用); 預設落在資料目錄下。

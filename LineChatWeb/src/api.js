@@ -141,7 +141,7 @@ export async function getSyncStatus() {
 }
 
 // 取得 chat_history 中最近有訊息的日期與時間(供同步按鈕旁顯示)。
-// 讀取某聊天紀錄對應的「分析＋推論」存檔(後端 GET /analysis)。
+// 讀取某聊天紀錄對應的「分析＋推論」(後端 GET /analysis, 來源 chat_vllm_suggest)。
 //   found=true 時 result = { savedAt, chatFile, analysis, suggest }。
 export async function getAnalysis(chatFile) {
   try {
