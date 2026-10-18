@@ -64,69 +64,6 @@ export default function AuthGate({ children }) {
 
   return (
     <div className="auth-shell">
-      <div className="auth-statusbar">
-        {authed && view === 'imagegen' ? (
-          <div className="gen-statusbar">
-            <button
-              className={'gen-menubtn' + (menuOpen ? ' open' : '')}
-              onClick={() => setMenuOpen((v) => !v)}
-              aria-expanded={menuOpen}
-            >
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <line x1="3" y1="6" x2="21" y2="6" />
-                <line x1="3" y1="12" x2="21" y2="12" />
-                <line x1="3" y1="18" x2="21" y2="18" />
-              </svg>
-              <span>選擇功能</span>
-            </button>
-            <span className="gen-title">模型生圖(影片)</span>
-          </div>
-        ) : (
-          <div className="chat-statusbar">
-            <button
-              className={'chat-status-btn' + (sidebarOpen ? ' active' : '')}
-              onClick={() => window.dispatchEvent(new Event('linechat-toggle-sidebar'))}
-              aria-pressed={sidebarOpen}
-              title="開合歷史聊天清單"
-            >
-              清單
-            </button>
-            <span className="auth-brand">LINE 聊天紀錄</span>
-            <button
-              className={'chat-status-btn' + (analysisOpen ? ' active' : '')}
-              onClick={() => window.dispatchEvent(new Event('linechat-toggle-analysis'))}
-              aria-pressed={analysisOpen}
-              title="開合聊天紀錄分析"
-            >
-              分析
-            </button>
-          </div>
-        )}
-      </div>
-
-      <div className="auth-body">
-        {authed && view === 'imagegen' && (
-          <>
-            {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
-            <div className={'gen-drawer' + (menuOpen ? ' open' : '')} role="menu">
-              <div className="gen-drawer-title">生圖功能</div>
-              {FUNCTIONS.map((f) => (
-                <button
-                  key={f.id}
-                  role="menuitem"
-                  className={'gen-item' + (active === f.id ? ' active' : '')}
-                  onClick={() => { setActive(f.id); if (isMobile()) setMenuOpen(false) }}
-                >
-                  <span className="gen-item-icon">{f.icon}</span>
-                  <span className="gen-item-text">
-                    <span className="gen-item-label">{f.label}</span>
-                    <span className="gen-item-desc">{f.desc}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </>
-        )}
         <nav className="auth-dock">
           <div className="auth-dock-top">
             <button
@@ -187,6 +124,71 @@ export default function AuthGate({ children }) {
           </div>
         </nav>
 
+      <div className="auth-main">
+      <div className="auth-statusbar">
+        {authed && view === 'imagegen' ? (
+          <div className="gen-statusbar">
+            <button
+              className={'gen-menubtn' + (menuOpen ? ' open' : '')}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-expanded={menuOpen}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+              <span>功能</span>
+            </button>
+            <span className="gen-title">模型生圖(影片)</span>
+          </div>
+        ) : (
+          <div className="chat-statusbar">
+            <button
+              className={'chat-status-btn' + (sidebarOpen ? ' active' : '')}
+              onClick={() => window.dispatchEvent(new Event('linechat-toggle-sidebar'))}
+              aria-pressed={sidebarOpen}
+              title="開合歷史聊天清單"
+            >
+              清單
+            </button>
+            <span className="auth-brand">LINE 聊天紀錄</span>
+            <button
+              className={'chat-status-btn' + (analysisOpen ? ' active' : '')}
+              onClick={() => window.dispatchEvent(new Event('linechat-toggle-analysis'))}
+              aria-pressed={analysisOpen}
+              title="開合聊天紀錄分析"
+            >
+              分析
+            </button>
+          </div>
+        )}
+      </div>
+
+      <div className="auth-body">
+        {authed && view === 'imagegen' && (
+          <>
+            {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
+            <div className={'gen-drawer' + (menuOpen ? ' open' : '')} role="menu">
+              <div className="gen-drawer-title">生圖功能</div>
+              {FUNCTIONS.map((f) => (
+                <button
+                  key={f.id}
+                  role="menuitem"
+                  className={'gen-item' + (active === f.id ? ' active' : '')}
+                  onClick={() => { setActive(f.id); if (isMobile()) setMenuOpen(false) }}
+                >
+                  <span className="gen-item-icon">{f.icon}</span>
+                  <span className="gen-item-text">
+                    <span className="gen-item-label">{f.label}</span>
+                    <span className="gen-item-desc">{f.desc}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
         <div className="auth-content">
           {state === 'loading' && (
             <div className="auth-center"><div className="auth-spinner" /></div>
@@ -204,6 +206,7 @@ export default function AuthGate({ children }) {
           )}
           {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : children)}
         </div>
+      </div>
       </div>
     </div>
   )

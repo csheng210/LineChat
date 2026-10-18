@@ -17,7 +17,7 @@ ComfyUI 生圖服務（FastAPI）
 帶 as_json=true 則回傳 {"image_base64":..., "prompt":...}。
 
 啟動：
-  uvicorn app:app --host 0.0.0.0 --port 8000
+  uvicorn app:app --host 0.0.0.0 --port 8204
   或 python app.py
 """
 import base64
@@ -37,6 +37,7 @@ import run_text2img
 import run_image1_edit
 import run_image2_edit
 import run_image2video
+import run_bgremove_qwen
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -161,6 +162,30 @@ def image2video(
     finally:
         os.remove(path)
     return _respond_video(video_bytes, as_json)
+
+
+@app.post("/bgremove")
+def bgremove(
+    image: UploadFile = File(..., description="輸入圖"),
+    prompt: Optional[str] = Form(None, description="提示詞（省略=預設去背提示）"),
+    width: Optional[int] = Form(None),
+    height: Optional[int] = Form(None),
+    seed: Optional[int] = Form(-1),
+    as_json: Optional[bool] = Form(False),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    try:
+        image_bytes, out_prompt = run_bgremove_qwen.generate(
+            image_path=path, prompt=prompt, width=width, height=height, seed=seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    return _respond(image_bytes, out_prompt, as_json)
 
 
 # ---- 非同步任務(供前端進度條輪詢) ----
@@ -382,6 +407,35 @@ def job_image2video(
     return {"job_id": job_id}
 
 
+@app.post("/job/bgremove")
+def job_bgremove(
+    image: UploadFile = File(...),
+    prompt: Optional[str] = Form(None),
+    width: Optional[int] = Form(None),
+    height: Optional[int] = Form(None),
+    seed: Optional[int] = Form(-1),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_bgremove_qwen.generate(
+                image_path=path, prompt=prompt, width=width, height=height, seed=seed,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _start_job(job_id, runner)
+    return {"job_id": job_id}
+
+
 @app.post("/job/cancel")
 def job_cancel(id: str):
     with JOBS_LOCK:
@@ -398,4 +452,4 @@ def job_cancel(id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("COMFYAPI_PORT", "8204")))

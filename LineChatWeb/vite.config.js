@@ -8,7 +8,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8201'
   const actionsTarget = env.VITE_ACTIONS_TARGET || 'http://127.0.0.1:8202'
-  const comfyTarget = env.VITE_COMFY_TARGET || 'http://127.0.0.1:8000'
+  const comfyTarget = env.VITE_COMFY_TARGET || 'http://127.0.0.1:8204'
   // 外部網域存取: VITE_DEV_ALLOWED_HOSTS 逗號分隔(例: a.example.com,b.example.com); 設 true 允許全部(不建議)。
   const allowedHostsRaw = (env.VITE_DEV_ALLOWED_HOSTS || '').trim()
   const allowedHosts = allowedHostsRaw === 'true' ? true : allowedHostsRaw ? allowedHostsRaw.split(',').map((h) => h.trim()).filter(Boolean) : undefined

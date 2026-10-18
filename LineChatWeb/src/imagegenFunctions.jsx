@@ -23,6 +23,17 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'bgremove',
+    label: '去背',
+    desc: '一張圖, 去背後產出一張圖(依原圖長寬)',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M4 16a6 6 0 0 1 8-5.5A5 5 0 0 1 18 15a3 3 0 0 1 0 6H6a4 4 0 0 1-2-5z" />
+        <path d="M4 20h16" />
+      </svg>
+    ),
+  },
+  {
     id: 'image2',
     label: '雙圖合成',
     desc: '兩張圖 + 提示詞, 輸出長寬依圖一',

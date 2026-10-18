@@ -24,8 +24,16 @@
 /* 外框: 直排 = 頂端 status bar + 下方 body(dock bar + 內容) */
 .auth-shell {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100vh;
+}
+
+/* 右欄: status bar(上) + 操作頁面(下) */
+.auth-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .auth-statusbar {
@@ -756,6 +764,29 @@
 @media (min-width: 861px) {
   .gen-drawer-backdrop {
     display: none;
+  }
+  /* 桌機: drawer 採 inline 排版, 展開時把右側內容往右推, 非懸浮 */
+  .gen-drawer {
+    position: relative;
+    top: auto;
+    left: auto;
+    bottom: auto;
+    z-index: auto;
+    width: 0;
+    max-width: 0;
+    padding: 12px 0;
+    border-right: none;
+    box-shadow: none;
+    transform: none;
+    overflow: hidden;
+    transition: width 0.25s ease, max-width 0.25s ease, padding 0.25s ease;
+  }
+  .gen-drawer.open {
+    width: 260px;
+    max-width: 260px;
+    padding: 12px;
+    border-right: 1px solid #e6e6e6;
+    overflow-y: auto;
   }
 }
 

@@ -5,17 +5,21 @@
 param(
   [int]$ApiPort = 0,
   [int]$ActionsPort = 0,
-  [int]$WebPort = 0
+  [int]$WebPort = 0,
+  [int]$ComfyPort = 0
 )
 $ErrorActionPreference = 'Stop'
 $root       = $PSScriptRoot
 $apiDir     = Join-Path $root 'LineChatAPI'
 $webDir     = Join-Path $root 'LineChatWeb'
 $actionsDir = Join-Path $root 'LineChatActions'
+$comfyDir   = Join-Path $root 'ComfyAPI'
 $py         = Join-Path $apiDir '.venv\Scripts\python.exe'
+$comfyPy    = Join-Path $comfyDir '.venv\Scripts\python.exe'
 
 $apiEnv     = Join-Path $apiDir     '.env'
 $actionsEnv = Join-Path $actionsDir '.env'
+$comfyEnv   = Join-Path $comfyDir '.env'
 $webEnv     = Join-Path $webDir     '.env'
 
 # 從 .env 檔讀取某個 key 的值(忽略註解/export 前綴/前後引號); 找不到回 $null
@@ -48,6 +52,7 @@ function Resolve-Port([int]$paramPort, [string]$envPath, [string]$envKey, [int]$
 $ApiPort     = Resolve-Port $ApiPort     $apiEnv     'LINE_CHAT_API_PORT' 8201
 $ActionsPort = Resolve-Port $ActionsPort $actionsEnv 'ACTIONS_PORT'       8202
 $WebPort     = Resolve-Port $WebPort     $webEnv     'VITE_DEV_PORT'      8200
+$ComfyPort   = Resolve-Port $ComfyPort   $comfyEnv   'COMFYAPI_PORT'      8204
 
 # 後端資料目錄: 以 LineChatAPI/.env 為準(缺值則退回 repo 根 Line-Data)
 $chatDir  = Get-EnvValue $apiEnv 'LINE_CHAT_API_CHAT_DIR'
@@ -55,7 +60,7 @@ $mediaDir = Get-EnvValue $apiEnv 'LINE_CHAT_API_MEDIA_DIR'
 if (-not $chatDir)  { $chatDir  = Join-Path $root 'Line-Data\chat_history' }
 if (-not $mediaDir) { $mediaDir = Join-Path $root 'Line-Data\chat_media' }
 
-Write-Host "設定來源: API=$ApiPort (LineChatAPI/.env), Actions=$ActionsPort (LineChatActions/.env), Web=$WebPort (LineChatWeb/.env)" -ForegroundColor DarkGray
+Write-Host "設定來源: API=$ApiPort (LineChatAPI/.env), Actions=$ActionsPort (LineChatActions/.env), Web=$WebPort (LineChatWeb/.env), Comfy=$ComfyPort (ComfyAPI/.env)" -ForegroundColor DarkGray
 
 if (-not (Test-Path $py)) {
   Write-Host "找不到後端 venv: $py" -ForegroundColor Red
@@ -143,6 +148,31 @@ if (-not (Test-Path $actionsFm) -or -not (Test-Path $actionsPw)) {
   }
   if ($aReady) { Write-Host "LineChatActions 就緒: http://127.0.0.1:$ActionsPort" -ForegroundColor Green }
   else { Write-Host "LineChatActions 25 秒內未就緒, 請看其視窗; 送訊可能暫時不可用。" -ForegroundColor Yellow }
+}
+
+# ---- 1.6) 生圖服務 ComfyAPI (FastAPI + uvicorn, port $ComfyPort) ----
+#   包裝 ComfyUI 生圖腳本; 前端 /comfy/* 經 vite proxy 轉到此服務。
+if (-not (Test-Path $comfyPy)) {
+  Write-Host '未偵測到 ComfyAPI venv, 生圖功能不會啟動。請先: cd ComfyAPI; python -m venv .venv; .venv\Scripts\python.exe -m pip install -r requirements.txt' -ForegroundColor Yellow
+} elseif (Test-Port $ComfyPort) {
+  $cRunning = $false
+  try { $ch = Invoke-RestMethod "http://127.0.0.1:$ComfyPort/health" -TimeoutSec 3; if ($ch.status -eq 'ok') { $cRunning = $true } } catch { }
+  if ($cRunning) { Write-Host "ComfyAPI 已在執行 (port $ComfyPort), 略過啟動" -ForegroundColor Yellow }
+  else { Write-Host "ComfyAPI port $ComfyPort 被其他程式佔用, 生圖暫不可用。" -ForegroundColor Red }
+} else {
+  Write-Host "啟動 ComfyAPI 生圖服務 (port $ComfyPort)..." -ForegroundColor Cyan
+  Start-Process powershell -WorkingDirectory $comfyDir -ArgumentList @(
+    '-NoExit', '-NoProfile', '-Command',
+    "`$host.UI.RawUI.WindowTitle='LineChatComfyAPI'; `$env:COMFYAPI_PORT='$ComfyPort'; & '$comfyPy' -m uvicorn app:app --host 127.0.0.1 --port $ComfyPort --app-dir '$comfyDir'"
+  ) | Out-Null
+  $cDeadline = (Get-Date).AddSeconds(25)
+  $cReady = $false
+  while ((Get-Date) -lt $cDeadline) {
+    try { $ch = Invoke-RestMethod "http://127.0.0.1:$ComfyPort/health" -TimeoutSec 2; if ($ch.status -eq 'ok') { $cReady = $true; break } }
+    catch { Start-Sleep -Milliseconds 500 }
+  }
+  if ($cReady) { Write-Host "ComfyAPI 就緒: http://127.0.0.1:$ComfyPort" -ForegroundColor Green }
+  else { Write-Host "ComfyAPI 25 秒內未就緒, 請看其視窗; 生圖可能暫時不可用。" -ForegroundColor Yellow }
 }
 
 # ---- 2) 前端 ----
