@@ -310,11 +310,18 @@ async function scrapeFlights(page, meta) {
       出發時間: r.出發時間,
       抵達時間: r.抵達時間,
       有無空位: r.有無空位,
+      更新時間: nowStamp(),
       ...(r.備註 ? { 備註: r.備註 } : {}),
     }));
 }
 
 // 合併寫入 tickets/華信-{出發}-{抵達}-{年-月}.json
+function nowStamp() {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) + " " + p(d.getHours()) + ":" + p(d.getMinutes()) + ":" + p(d.getSeconds());
+}
+
 function saveFlights(flights, meta) {
   const dir = path.resolve("tickets");
   fs.mkdirSync(dir, { recursive: true });

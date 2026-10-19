@@ -195,6 +195,10 @@ app.get("/sync", async (req, res) => {
 
   let routes = loadRoutes();
   if (airline !== "all") routes = routes.filter((r) => r.airline === airline);
+  const depCode = req.query.dep ? resolveCityCode(req.query.dep) : null;
+  const arrCode = req.query.arr ? resolveCityCode(req.query.arr) : null;
+  if (depCode) routes = routes.filter((r) => r.dep === depCode);
+  if (arrCode) routes = routes.filter((r) => r.arr === arrCode);
   if (!routes.length) return res.status(400).json({ ok: false, 訊息: "無符合的澎湖航線（airline 參數？）" });
 
   const tasks = routes.map((r) => ({ airline: r.airline, route: r, start, end, pax }));

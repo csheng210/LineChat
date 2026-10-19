@@ -280,6 +280,16 @@
   background: #eaf7ef;
 }
 
+/* 航班航線選單: 偶數列淡灰底色 */
+.gen-drawer-flights .gen-item:nth-child(4n):not(.active),
+.gen-drawer-flights .gen-item:nth-child(4n+1):not(.active) {
+  background: #f1f2f4;
+}
+.gen-drawer-flights .gen-item:nth-child(4n):not(.active):hover,
+.gen-drawer-flights .gen-item:nth-child(4n+1):not(.active):hover {
+  background: #f6fbf8;
+}
+
 .gen-item-icon {
   flex: none;
   display: inline-flex;
@@ -309,7 +319,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  padding: 16px 20px;
+  padding: 16px 12px;
   overflow-y: auto;
 }
 
@@ -739,12 +749,43 @@
   border-right: 1px solid #e6e6e6;
   box-shadow: 6px 0 24px rgba(0, 0, 0, 0.12);
   overflow-y: auto;
-  transform: translateX(-100%);
+  transform: translateX(calc(-100% - 48px));
   transition: transform 0.25s ease;
 }
 
 .gen-drawer.open {
   transform: translateX(0);
+}
+
+.gen-drawer-wide {
+  width: 520px;
+  max-width: calc(100vw - 96px);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto;
+  grid-auto-rows: auto;
+  gap: 8px;
+  align-content: start;
+}
+
+.gen-drawer-wide .gen-drawer-title {
+  grid-column: 1 / -1;
+}
+
+.gen-drawer-wide .gen-item {
+  min-height: 78px;
+}
+
+.gen-drawer-sep {
+  grid-column: 1 / -1;
+  height: 1px;
+  background: #e6e6e6;
+  margin: 2px 0;
+}
+
+.gen-item-empty {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .gen-drawer-title {
@@ -788,6 +829,10 @@
     border-right: 1px solid #e6e6e6;
     overflow-y: auto;
   }
+  .gen-drawer-wide.open {
+    width: 520px;
+    max-width: 520px;
+  }
 }
 
 
@@ -826,3 +871,299 @@
   background: #06c755;
   border-color: #06c755;
 }
+
+/* ===== 航班資訊頁面 (FlightBoard) ===== */
+.flt-nav {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.flt-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #06c755;
+  background: #fff;
+  border: 1px solid #b9e6cb;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.flt-nav-btn:hover {
+  background: #eaf7ef;
+}
+
+.flt-nav-label {
+  font-size: 15px;
+  font-weight: 700;
+  color: #222;
+  min-width: 120px;
+  text-align: center;
+}
+
+.flt-legend {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: #666;
+}
+
+.flt-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.flt-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #06c755;
+  background: #d6f5e1;
+}
+
+.flt-cross {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  text-align: center;
+  color: #e5484d;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.flt-empty {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  background: #eee;
+}
+
+.flt-hint {
+  padding: 16px 4px;
+  font-size: 13px;
+  color: #888;
+}
+
+.flt-error {
+  padding: 8px 4px;
+  font-size: 13px;
+  color: #e5484d;
+}
+
+.flt-table-wrap {
+  overflow: auto;
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  background: #fff;
+  max-width: 100%;
+}
+
+.flt-table {
+  border-collapse: collapse;
+  font-size: 12px;
+  width: 100%;
+  min-width: 100%;
+  table-layout: fixed;
+}
+
+.flt-table th,
+.flt-table td {
+  border: 1px solid #eef0f2;
+  text-align: center;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+
+.flt-day-head,
+.flt-time-head {
+  position: sticky;
+  top: 0;
+  background: #f6fbf8;
+  color: #06c755;
+  font-weight: 700;
+  z-index: 2;
+}
+
+.flt-day-head {
+  left: 0;
+  z-index: 3;
+}
+
+.flt-day {
+  position: sticky;
+  left: 0;
+  background: #f6fbf8;
+  color: #333;
+  font-weight: 600;
+  z-index: 1;
+}
+
+.flt-day-head,
+.flt-day { width: 64px; }
+
+.flt-cell {
+  min-width: 30px;
+  height: 26px;
+}
+
+.flt-cell-empty {
+  background: #fafafa;
+}
+
+.flt-cell-ok .flt-dot {
+  width: 16px;
+  height: 16px;
+}
+
+.flt-cell-no .flt-cross {
+  width: 16px;
+  height: 16px;
+  font-size: 14px;
+}
+
+/* --- 航班頁面: 手機友善增強 --- */
+.flt-nav-today { color: #444; border-color: #d8d8d8; }
+.flt-nav-today:hover { background: #f2f2f2; }
+.flt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: 12px;
+  color: #666;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.flt-legend-hint { color: #999; }
+
+.flt-table-wrap { -webkit-overflow-scrolling: touch; }
+.flt-day, .flt-day-head { box-shadow: 1px 0 0 #e6e6e6; }
+
+.flt-row-today .flt-day { color: #06c755; }
+.flt-row-today td { background: #f3fbf6; }
+
+.flt-cell-ok { background: #eafaf0; }
+.flt-cell-no { background: #fdecec; }
+.flt-cell-btn { cursor: pointer; }
+.flt-cell-btn:hover { filter: brightness(0.97); }
+.flt-cell-active { outline: 2px solid #06c755; outline-offset: -2px; }
+
+.flt-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: #999;
+  text-align: right;
+}
+
+.flt-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  left: 48px;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 9400;
+}
+.flt-detail {
+  position: fixed;
+  left: 48px;
+  right: 0;
+  bottom: 0;
+  z-index: 9500;
+  background: #fff;
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.18);
+  max-height: 60vh;
+  overflow: auto;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+}
+.flt-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.flt-detail-head strong { font-size: 15px; color: #222; }
+.flt-detail-close {
+  border: none;
+  background: #f0f0f0;
+  color: #666;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+}
+.flt-detail-row {
+  display: grid;
+  grid-template-columns: 72px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 8px;
+  border-radius: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.flt-detail-row.is-ok { background: #f2fbf5; }
+.flt-detail-row.is-no { background: #fdf3f3; }
+.flt-detail-airline { font-size: 12px; font-weight: 700; color: #333; }
+.flt-detail-main { display: flex; flex-direction: column; gap: 2px; }
+.flt-detail-no { font-size: 13px; font-weight: 600; color: #222; }
+.flt-detail-time { font-size: 12px; color: #555; }
+.flt-detail-craft { font-size: 11px; color: #999; }
+.flt-detail-seats { display: flex; align-items: center; gap: 6px; }
+.flt-detail-note { font-size: 11px; color: #999; }
+
+@media (min-width: 861px) {
+  .flt-detail {
+    left: auto;
+    right: 24px;
+    bottom: 24px;
+    width: 360px;
+    border-radius: 14px;
+    max-height: 70vh;
+  }
+}
+
+/* 航空公司圈圈編碼: 綠=立榮, 藍=華信, 綠包藍=兩家都有 */
+.flt-dot-blue {
+  border-color: #2f7ed8;
+  background: #dceafb;
+}
+.flt-dot-both {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid #06c755;
+  background: #eafaf0;
+}
+.flt-dot-both-inner {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2f7ed8;
+}
+.flt-cell-ok .flt-dot-both { width: 18px; height: 18px; }
+.flt-cell-ok .flt-dot-blue { width: 16px; height: 16px; }
+
+.flt-dot-num { font-size: 9px; font-weight: 700; color: #0a8a3d; line-height: 1; }
+.flt-dot-blue .flt-dot-num { color: #2f7ed8; }
+.flt-dot-both-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: #fff; line-height: 1; }
+.flt-cross-num { font-size: 9px; font-weight: 700; color: #e5484d; line-height: 1; }
+
+.flt-detail-updated { font-size: 11px; color: #999; }

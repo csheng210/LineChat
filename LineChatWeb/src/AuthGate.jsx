@@ -1,8 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { checkAuth, login, logout } from './auth.js'
 import ImageGen from './ImageGen.jsx'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
+import FlightBoard from './FlightBoard.jsx'
 import './AuthGate.css'
+
+// 航班航線固定順序: 每列 [城市往澎湖, 澎湖往城市]
+const FLT_ROUTE_ORDER = [
+  ['TSA', 'MZG'],
+  ['RMQ', 'MZG'],
+  ['KHH', 'MZG'],
+  ['TNN', 'MZG'],
+  ['CYI', 'MZG'],
+  ['KNH', 'MZG'],
+]
 
 // 授權閘門: 頂端 status bar(僅品牌) + 左側 docker bar(上=首頁/生圖, 下=帳號登入/登出)。
 //   帳號圖示在 docker bar 最下方, 點開 popover 顯示登入狀態與登入/登出(未登入含登入表單)。
@@ -13,6 +24,8 @@ export default function AuthGate({ children }) {
   const [open, setOpen] = useState(false)
   const [view, setView] = useState('chat') // chat | imagegen
   const [active, setActive] = useState('image1') // 生圖功能, 預設單圖編輯
+  const [routes, setRoutes] = useState([]) // 航班航線清單
+  const [route, setRoute] = useState(null) // 選中航線 { dep, arr, 出發, 目的地 }
   const isMobile = () => window.matchMedia('(max-width: 860px)').matches
   const [menuOpen, setMenuOpen] = useState(() => !window.matchMedia('(max-width: 860px)').matches) // 手機預設收合
   const [sidebarOpen, setSidebarOpen] = useState(true) // 由 App 回報: 清單面板開合
@@ -46,6 +59,24 @@ export default function AuthGate({ children }) {
     document.addEventListener('mousedown', onDown)
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
+
+  // 航班: 進入 flights 視圖時向 FlyTicketAPI 抓取航線清單(依 dep+arr 去重)
+  useEffect(() => {
+    if (view !== 'flights' || routes.length) return
+    fetch('/flights-api/routes')
+      .then((r) => r.json().catch(() => ({})))
+      .then((d) => {
+        const map = {}
+        for (const r of (d['航線'] || [])) {
+          const k = r.dep + '>' + r.arr
+          if (!map[k]) map[k] = { dep: r.dep, arr: r.arr, 出發: r['出發'], 目的地: r['目的地'] }
+        }
+        const uniq = Object.values(map)
+        setRoutes(uniq)
+        setRoute((cur) => cur || uniq[0] || null)
+      })
+      .catch(() => {})
+  }, [view, routes.length])
 
   const authed = state === 'auth'
 
@@ -88,6 +119,17 @@ export default function AuthGate({ children }) {
                 <rect x="3" y="3" width="18" height="18" rx="2" />
                 <circle cx="9" cy="9" r="2" />
                 <path d="m21 15-3.5-3.5L9 20" />
+              </svg>
+            </button>
+
+            <button
+              className={'auth-dock-btn' + (view === 'flights' ? ' on' : '')}
+              onClick={() => setView('flights')}
+              title="航班"
+              aria-label="航班"
+            >
+              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" stroke="none" aria-hidden="true">
+                <path d="M21 15.5v-1.7l-7.5-4.7V4.2a1.5 1.5 0 0 0-3 0v4.9L3 13.8v1.7l7.5-2.3v4.3l-2.1 1.5v1.4L12 20.6l3.6.8v-1.4l-2.1-1.5v-4.3L21 15.5Z" />
               </svg>
             </button>
           </div>
@@ -142,6 +184,22 @@ export default function AuthGate({ children }) {
             </button>
             <span className="gen-title">模型生圖(影片)</span>
           </div>
+        ) : authed && view === 'flights' ? (
+          <div className="gen-statusbar">
+            <button
+              className={'gen-menubtn' + (menuOpen ? ' open' : '')}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-expanded={menuOpen}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+              <span>航線</span>
+            </button>
+            <span className="gen-title">航班資訊</span>
+          </div>
         ) : (
           <div className="chat-statusbar">
             <button
@@ -169,7 +227,7 @@ export default function AuthGate({ children }) {
         {authed && view === 'imagegen' && (
           <>
             {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
-            <div className={'gen-drawer' + (menuOpen ? ' open' : '')} role="menu">
+            <div className={'gen-drawer gen-drawer-wide gen-drawer-flights' + (menuOpen ? ' open' : '')} role="menu">
               <div className="gen-drawer-title">生圖功能</div>
               {FUNCTIONS.map((f) => (
                 <button
@@ -189,6 +247,47 @@ export default function AuthGate({ children }) {
           </>
         )}
 
+        {authed && view === 'flights' && (
+          <>
+            {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
+            <div className={'gen-drawer gen-drawer-wide' + (menuOpen ? ' open' : '')} role="menu">
+              <div className="gen-drawer-title">航班航線</div>
+              {FLT_ROUTE_ORDER.map(([a, b]) => {
+                const r1 = routes.find((r) => r.dep === a && r.arr === b)
+                const r2 = routes.find((r) => r.dep === b && r.arr === a)
+                return (
+                  <Fragment key={a + b}>
+                    {[r1, r2].map((r, idx) => (
+                      r ? (
+                        <button
+                          key={r.dep + '>' + r.arr}
+                          role="menuitem"
+                          className={'gen-item' + (route && route.dep === r.dep && route.arr === r.arr ? ' active' : '')}
+                          onClick={() => { setRoute(r); if (isMobile()) setMenuOpen(false) }}
+                        >
+                          <span className="gen-item-icon">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                              <path d="M17.8 19.2 16 11.0 3.5 3.5 5.0 5.0 11.0 16 19.2 17.8 21.0 16.0 17.8 19.2Z" />
+                            </svg>
+                          </span>
+                          <span className="gen-item-text">
+                            <span className="gen-item-label">{r['出發']} 往 {r['目的地']}</span>
+                            <span className="gen-item-desc">{r.dep} → {r.arr}</span>
+                          </span>
+                        </button>
+                      ) : (
+                        <span key={'ph' + a + b + idx} className="gen-item gen-item-empty" />
+                      )
+                    ))}
+                    <div className="gen-drawer-sep" />
+                  </Fragment>
+                )
+              })}
+              {routes.length === 0 && <div className="gen-item-desc" style={{ padding: '8px' }}>載入航線中…</div>}
+            </div>
+          </>
+        )}
+
         <div className="auth-content">
           {state === 'loading' && (
             <div className="auth-center"><div className="auth-spinner" /></div>
@@ -204,7 +303,7 @@ export default function AuthGate({ children }) {
               </div>
             </div>
           )}
-          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : children)}
+          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : view === 'flights' ? <FlightBoard route={route} /> : children)}
         </div>
       </div>
       </div>

@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   const apiTarget = env.VITE_API_TARGET || 'http://127.0.0.1:8201'
   const actionsTarget = env.VITE_ACTIONS_TARGET || 'http://127.0.0.1:8202'
   const comfyTarget = env.VITE_COMFY_TARGET || 'http://127.0.0.1:8204'
+  const flightsTarget = env.VITE_FLIGHTS_TARGET || 'http://127.0.0.1:8205'
   // 外部網域存取: VITE_DEV_ALLOWED_HOSTS 逗號分隔(例: a.example.com,b.example.com); 設 true 允許全部(不建議)。
   const allowedHostsRaw = (env.VITE_DEV_ALLOWED_HOSTS || '').trim()
   const allowedHosts = allowedHostsRaw === 'true' ? true : allowedHostsRaw ? allowedHostsRaw.split(',').map((h) => h.trim()).filter(Boolean) : undefined
@@ -41,6 +42,12 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (p) => p.replace(/^\/comfy/, ''),
         },
+        // 航班: /flights-api/* -> FlyTicketAPI (Node, 立榮/華信航班空位)
+        '/flights-api': {
+          target: flightsTarget,
+          changeOrigin: true,
+          rewrite: (p) => p.replace(/^\/flights-api/, ''),
+        },
       },
     },
     preview: {
@@ -51,6 +58,7 @@ export default defineConfig(({ mode }) => {
         '/api': { target: apiTarget, changeOrigin: true },
         '/actions': { target: actionsTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/actions/, '') },
         '/comfy': { target: comfyTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/comfy/, '') },
+        '/flights-api': { target: flightsTarget, changeOrigin: true, rewrite: (p) => p.replace(/^\/flights-api/, '') },
       },
     },
   }
