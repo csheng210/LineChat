@@ -22,11 +22,11 @@ npm start          # 預設 http://localhost:8680（可用 PORT 環境變數改�
 ### GET /sync
 輸入日期範圍，同步所有澎湖航線。
 ```
-GET /sync?start=2026-10-25&end=2026-10-29&pax=2&airline=all&concurrency=1
+GET /sync?start=2026-10-25&end=2026-10-29&pax=4&airline=all&concurrency=1
 ```
 參數：
 - `start`（必填）、`end`（預設同 start）：接受 `2026-10-25` / `2026/10/25` / `20261025`
-- `pax`：成人旅客人數（預設 1）
+- `pax`：成人旅客人數（預設 4）
 - `airline`：`uniair` / `mandarin` / `all`（預設 all）
 - `concurrency`：平行抓取數 1~4（預設 1）。**華信走真實 profile 共用鎖，API 內部對華信任務強制串行**（不受此參數影響）；uniair 為 headless 獨立瀏覽器，可依此參數平行。
 - `timeoutMs`：單條航線逾時毫秒（預設 600000）

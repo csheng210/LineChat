@@ -107,13 +107,13 @@ app.get("/routes", (req, res) => {
   catch (e) { res.status(500).json({ ok: false, 訊息: e.message }); }
 });
 
-// GET /sync?start=2026-10-25&end=2026-10-29&pax=2&airline=all&concurrency=1&timeoutMs=600000
+// GET /sync?start=2026-10-25&end=2026-10-29&pax=4&airline=all&concurrency=1&timeoutMs=600000
 app.get("/sync", async (req, res) => {
   const start = parseDate(req.query.start);
   const end = parseDate(req.query.end) || start;
   if (!start) return res.status(400).json({ ok: false, 訊息: "需要 start 日期（例 2026-10-25）" });
   if (end.ymd < start.ymd) return res.status(400).json({ ok: false, 訊息: "end 不可早於 start" });
-  const pax = Math.max(1, parseInt(req.query.pax || "1", 10));
+  const pax = Math.max(1, parseInt(req.query.pax || "4", 10));
   const airline = (req.query.airline || "all").toLowerCase();
   const concurrency = Math.max(1, Math.min(4, parseInt(req.query.concurrency || "1", 10)));
   const timeoutMs = Math.max(60000, parseInt(req.query.timeoutMs || "600000", 10));
