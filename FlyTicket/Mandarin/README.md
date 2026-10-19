@@ -9,7 +9,9 @@
 npm install
 npx playwright install chrome
 ```
-> 需本機 Chrome（腳本用 `channel: "chrome"` 繞過 CloudFront/Cloudflare 擋載）。
+> 需本機 Chrome。腳本把**真實 Chrome profile 複製**到獨立目錄 `.chrome-profile/`，再用
+> `launchPersistentContext` 啟動該複製目錄（`channel: "chrome"`，預設 headed）。
+> 帶著真實 cookies/登入/UA，最不易被 CloudFront 擋。
 
 ## 執行
 ```powershell
@@ -22,6 +24,9 @@ node mandarin-search.js --dep 松山 --arr 金門 --date 2026-10-25 --pax 2
 - `--end-date`：結束日期，一次抓取「出發日 ~ 結束日」逐日空位
 - `--pax`：成人旅客人數（預設 1）
 - `--headless`：不開視窗（華信常擋 headless，建議不加）
+- `--profile`：啟動用的 profile 目錄（預設 `.chrome-profile/`，由真實 profile 複製而來）
+- `--profile-directory`：profile 目錄名（預設 `Default`，可用環境變數 `CHROME_PROFILE`）
+- 環境變數 `CHROME_REAL_PROFILE_DIR`：真實 Chrome User Data 來源（預設本機 `User Data`）
 - `--keep-open`：跑完保持瀏覽器開啟（除錯用）
 - `--tries`：搜尋結果被擋時的重試次數（預設 6）
 
@@ -37,7 +42,16 @@ node mandarin-search.js --dep 松山 --arr 金門 --date 2026-10-25 --pax 2
 - 有無空位：按鈕「我要購票」= 有；「我要候補」= 無
 - 同月份整併到同一檔：以「日期+航班編號」為鍵，同鍵以最新覆蓋，依日期/出發時間排序
 
-## 反擋說明
-華信走 AWS CloudFront，間歇性回傳 403（Request blocked）。腳本以headed Chrome +
-`--disable-blink-features=AutomationControlled` 降低被擋機率，並對「開頁」與「搜尋結果」
-都做重試（開頁最多 10 次、搜尋最多 `--tries` 次），直到取得有效航班頁為止。
+## 反擋說明（複製真實 Chrome profile）
+華信走 AWS CloudFront，間歇性回傳 403（Request blocked）。腳本以 robocopy 把你本機真實
+Chrome profile 複製到獨立目錄 `.chrome-profile/`，再用 `chromium.launchPersistentContext`
+啟動該複製目錄（預設 headed）。真實 cookies/登入/UA 讓指紋接近真人，大幅降低被擋機率，
+並對「開頁」與「搜尋結果」都做重試。
+
+**為什麼要複製、不直接用真實 profile？**
+Chrome 基於安全限制，**不允許在「預設」user-data-dir 上啟用 DevTools 遠端除錯**
+（`DevTools remote debugging requires a non-default data directory`），Playwright 直接 attach
+真實 profile 會逾時。複製到非預設目錄即可繞過此限制。
+
+> 複製目錄是獨立鎖，**不需先關閉 Chrome** 即可抓取（cookies 為 best-effort，Chrome 執行中
+> 被鎖的檔案會略過複製）。FlyTicketAPI 對華信任務強制串行（concurrency=1）。

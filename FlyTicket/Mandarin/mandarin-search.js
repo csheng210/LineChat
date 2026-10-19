@@ -3,8 +3,10 @@
 // 用法:
 //   node mandarin-search.js --dep 松山 --arr 金門 --date 2026-10-25 --pax 2
 //   範圍: --end-date 2026-10-29   選項: --headless --keep-open
+//   真實 Chrome profile(預設,headed): --profile <User Data 目錄> --profile-directory Default
 import "dotenv/config";
 import { chromium } from "playwright";
+import { execSync } from "child_process";
 import fs from "fs";
 import path from "path";
 
@@ -109,6 +111,55 @@ async function isGoodResult(page) {
   return n > 0;
 }
 
+
+// 用真實 Chrome profile 啟動（最不易被 CloudFront 擋）
+// profile 被佔用（Chrome 正在執行）時重試並給明確提示
+// 把真實 Chrome profile 複製到獨立目錄（非預設 data dir 才能啟用 DevTools 遠端除錯）
+// 複製目錄帶著真實 cookies/登入/UA，且為獨立鎖 -> 不需先關閉 Chrome
+function prepareProfile(srcDir, workDir) {
+  fs.mkdirSync(workDir, { recursive: true });
+  const xd = ["Cache", "Code Cache", "GPUCache", "Service Worker", "Crashpad", "component_crx_cache", "Default\\Cache", "Default\\Code Cache", "Default\\GPUCache", "Default\\Service Worker"];
+  const xf = ["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"];
+  const cmd = 'robocopy "' + srcDir + '" "' + workDir + '" /E /XD ' + xd.join(" ") + " /XF " + xf.join(" ") + " /NFL /NDL /NJH /NJS /R:1 /W:1";
+  try { execSync(cmd, { stdio: "ignore" }); }
+  catch (e) { const code = e && e.status; if (code >= 8) throw new Error("複製 Chrome profile 失敗 (robocopy code=" + code + ")"); }
+}
+
+async function launchPersistent({ userDataDir, profileDirectory, headless }) {
+  const launchArgs = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--disable-component-update",
+    "--profile-directory=" + profileDirectory,
+  ];
+  const maxLaunch = 5;
+  for (let i = 1; i <= maxLaunch; i++) {
+    try {
+      return await chromium.launchPersistentContext(userDataDir, {
+        headless,
+        channel: "chrome",
+        args: launchArgs,
+        viewport: { width: 1280, height: 900 },
+        ignoreDefaultArgs: ["--enable-automation"],
+      });
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (/ProcessSingleton|SingletonLock|Singleton|already running|user-specified|cannot be used|failed to launch|target closed|Target page, context or browser has been closed|has been closed|process did exit/i.test(msg)) {
+        console.error("[啟動失敗] Chrome profile 被佔用: " + userDataDir + " (" + profileDirectory + ")");
+        console.error("  -> 請先完全關閉所有 Chrome 視窗與背景 process，再重跑。");
+        console.error("  第 " + i + "/" + maxLaunch + " 次重試，5 秒後...");
+        await new Promise((r) => setTimeout(r, 5000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("無法啟動 Chrome persistent profile（profile 持續被佔用）");
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const dep = resolveCity(args.dep);
@@ -118,13 +169,17 @@ async function main() {
   const pax = parseInt(args.pax || "1", 10);
   const date = parseDate(args.date);
   const headless = !!args.headless;
+  const realProfile = process.env.CHROME_REAL_PROFILE_DIR || "C:\\Users\\Administrator\\AppData\\Local\\Google\\Chrome\\User Data";
+  const profileDirectory = args.profileDirectory || process.env.CHROME_PROFILE || "Default";
+  const workProfile = args.profile || path.resolve(".chrome-profile");
   console.log("[輸入] 啟程=" + dep + "(" + CITY[dep] + ") 目的地=" + arr + "(" + CITY[arr] + ") 日期=" + date.str + " 人數=" + pax);
 
-  const browser = await chromium.launch({ headless, channel: "chrome", args: ["--disable-blink-features=AutomationControlled"] });
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
-  const page = await ctx.newPage();
+  console.log("[profile] 複製真實 profile -> " + workProfile + " (profile=" + profileDirectory + ")");
+  prepareProfile(realProfile, workProfile);
+  const ctx = await launchPersistent({ userDataDir: workProfile, profileDirectory, headless });
+  const page = ctx.pages()[0] || (await ctx.newPage());
 
-  if (!(await openForm(page))) { console.error("[失敗] 搜尋頁無法載入（被擋）"); await browser.close(); process.exit(2); }
+  if (!(await openForm(page))) { console.error("[失敗] 搜尋頁無法載入（被擋）"); await ctx.close(); process.exit(2); }
   await page.waitForTimeout(1000);
 
   // 送出搜尋並取得有效結果頁（CloudFront 403 會重試）
@@ -139,7 +194,7 @@ async function main() {
     await openForm(page);
     await page.waitForTimeout(800);
   }
-  if (!result) { console.error("[失敗] 多次搜尋仍未取得航班結果"); await browser.close(); process.exit(2); }
+  if (!result) { console.error("[失敗] 多次搜尋仍未取得航班結果"); await ctx.close(); process.exit(2); }
   console.log("[完成] 結果頁:", result.url());
 
   // 日期範圍抓取
@@ -162,7 +217,7 @@ async function main() {
   for (const s of saved) console.log("[寫入] " + s.file + ": 整併後共 " + s.count + " 筆");
 
   if (args.keepOpen) { console.log("[keep-open] 瀏覽器保持開啟，按 Ctrl+C 結束"); await result.waitForTimeout(1000 * 60 * 10); }
-  await browser.close();
+  await ctx.close();
 }
 
 const CN_MONTH = { 一月:1,二月:2,三月:3,四月:4,五月:5,六月:6,七月:7,八月:8,九月:9,十月:10,十一月:11,十二月:12 };
