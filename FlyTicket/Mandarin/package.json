@@ -1,0 +1,13 @@
+{
+  "name": "mandarin",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "mandarin-search.js",
+  "scripts": {
+    "search": "node mandarin-search.js"
+  },
+  "dependencies": {
+    "dotenv": "^18.0.8",
+    "playwright": "^1.64.1"
+  }
+}
