@@ -16,9 +16,11 @@ export async function solveCaptcha(imageBuffer, { expectedLen = 6 } = {}) {
   const dataUrl = `data:image/png;base64,${imageBuffer.toString("base64")}`;
 
   const prompt = [
-    "這是一張網站驗證碼圖片（CAPTCHA）。",
-    "請只輸出圖片中的字元，共 " + expectedLen + " 個，通常為英文大寫字母與數字的組合。",
-    "忽略干擾線、噪點與背景。只輸出字元本身，不要任何說明、標點或空格。",
+    "這是一張網站驗證碼圖片（CAPTCHA），由 " + expectedLen + " 個字元由左到右排列。",
+    "這些字元幾乎都是數字（0-9），偶爾有大寫英文字母。",
+    "字體為綠色描邊、白色背景，圖中可能有綠色小圓點等干擾雜點，請忽略雜點只看字元本體。",
+    "請逐位仔細判讀每一個字元，特别注意 0/8、1/7、3/8、6/8、5/3 等易混淆的數字。",
+    "只輸出這 " + expectedLen + " 個字元本身，從左到右，不要任何說明、標點、空格或換行。",
   ].join(" ");
 
   let lastErr;

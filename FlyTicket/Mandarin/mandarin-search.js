@@ -44,7 +44,7 @@ function parseDate(str) {
   const m = String(str).match(/(\d{4})\D?(\d{1,2})\D?(\d{1,2})/);
   if (!m) throw new Error("無法解析日期: " + str);
   const y = +m[1], mo = +m[2], d = +m[3];
-  return { y, mo, d, str: y + "/" + mo + "/" + d, ymd: y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0") };
+  return { y, mo, d, str: y + "/" + String(mo).padStart(2, "0") + "/" + String(d).padStart(2, "0"), ymd: y + "-" + String(mo).padStart(2, "0") + "-" + String(d).padStart(2, "0") };
 }
 
 // 開啟搜尋頁並等表單出現（CloudFront/Cloudflare 會間歇性擋，重載重試）

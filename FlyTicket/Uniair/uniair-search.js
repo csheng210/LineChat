@@ -12,6 +12,29 @@ import path from "path";
 
 const URL = "https://www.uniair.com.tw/rwd/B2C/booking/ubk_search.aspx";
 
+// 用瀏覽器 canvas 把驗證碼放大後再截圖 (量化視覺模型對小圖 OCR 不穩, 放大可大幅提升辨識率)
+async function captureCaptchaUpscaled(page, sel, scale = 4) {
+  const id = "__cap_upscale__";
+  await page.evaluate(({ sel, scale, id }) => {
+    const img = document.querySelector(sel);
+    if (!img) return;
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    let c = document.getElementById(id);
+    if (!c) { c = document.createElement("canvas"); c.id = id; document.body.appendChild(c); }
+    c.width = w * scale; c.height = h * scale;
+    c.style.position = "fixed"; c.style.left = "0px"; c.style.top = "0px";
+    c.style.zIndex = "999999"; c.style.background = "#fff";
+    const ctx = c.getContext("2d");
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+  }, { sel, scale, id });
+  const el = await page.$("#" + id);
+  const shot = el ? await el.screenshot() : await (await page.$(sel)).screenshot();
+  await page.evaluate((id) => { const c = document.getElementById(id); if (c) c.remove(); }, id);
+  return shot;
+}
+
 const CITY = {
   TSA: "松山", RMQ: "台中", CYI: "嘉義", TNN: "台南", KHH: "高雄",
   HUN: "花蓮", TTT: "台東", KNH: "金門", MZG: "澎湖", LZN: "南竿", MFK: "北竿",
@@ -36,6 +59,7 @@ function parseArgs(argv) {
     const a = argv[i];
     if (a === "--headless") args.headless = true;
     else if (a === "--keep-open") args.keepOpen = true;
+    else if (a === "--pause-before-submit") args.pauseBeforeSubmit = true;
     else if (a.startsWith("--")) args[a.slice(2).replace(/-([a-z])/g, (_m, c) => c.toUpperCase())] = argv[++i];
   }
   return args;
@@ -116,7 +140,7 @@ async function main() {
   for (let attempt = 1; attempt <= maxTries && !entered; attempt++) {
     await fillForm(page, { dep, arr, date, pax });
     await page.waitForSelector(capImgSel);
-    const capShot = await (await page.$(capImgSel)).screenshot();
+    const capShot = await captureCaptchaUpscaled(page, capImgSel, 4);
     fs.writeFileSync(path.resolve("captcha.png"), capShot);
     let code;
     if (args.captcha && attempt === 1) {
@@ -138,20 +162,42 @@ async function main() {
     if (missing.length) console.error("[警告] 欄位未填:", missing.join(", "));
     if (attempt === 1) console.log("[確認輸入]", state);
 
+    // 暫停模式: 填好驗證碼後先不按搜尋, 把送給模型的驗證碼圖與辨識碼存檔讓使用者比對
+    if (args.pauseBeforeSubmit) {
+      fs.writeFileSync(path.resolve("captcha.png"), capShot);
+      try { const capEl = await page.$(capImgSel); if (capEl) fs.writeFileSync(path.resolve("captcha-live.png"), await capEl.screenshot()); } catch (e) {}
+      console.log(`[暫停] 模型辨識碼=${code} 已填入, 尚未按搜尋。`);
+      console.log(`[暫停] 送給模型的圖(放大4倍)= captcha.png ; 網頁原始驗證碼圖= captcha-live.png`);
+      await browser.close();
+      process.exit(0);
+    }
+
     await page.click("#CPH_Body_btn_SelectFlight");
     // postback 導航可能較慢，用 waitForURL 偵測是否離開搜尋頁進入航班頁
     try {
-      await page.waitForURL(/ubk_select-itinerary/, { timeout: 12000 });
+      await page.waitForURL(/ubk_select-itinerary/, { timeout: 25000 });
       entered = true;
     } catch (e) {
-      await page.waitForTimeout(800);
+      await page.waitForTimeout(1500);
       if (!page.url().includes("ubk_search.aspx")) entered = true;
     }
-    if (!entered) console.log(`[驗證碼] 第 ${attempt} 次未通過（辨識誤判或逾時），重載重試...`);
+    if (!entered) {
+      try {
+        const dbg = await page.evaluate(() => {
+          const t = document.body.innerText.replace(/\s+/g, " ").trim();
+          const m = t.match(/(驗證碼[^。]{0,20}|captcha[^.]{0,20}|不正確|錯誤|請重新|無法|逾期|過期)/i);
+          const cap = document.querySelector("#CPH_Body_txt_CaptchaCode");
+          return { url: location.href, hit: m ? m[0] : "", capVal: cap ? cap.value : "", snippet: t.slice(0, 300) };
+        });
+        console.log(`[驗證碼] 第 ${attempt} 次未通過 url=${dbg.url} 輸入=${dbg.capVal} hit=${dbg.hit}`);
+        console.log(`[驗證碼] 頁面文字=${dbg.snippet}`);
+      } catch (e2) { console.log(`[驗證碼] 第 ${attempt} 次未通過（除錯抓取失敗: ${e2.message}）`); }
+      console.log(`[驗證碼] 第 ${attempt} 次重載重試...`);
+    }
   }
 
-  fs.writeFileSync("after-search.png", await page.screenshot({ fullPage: true }));
-  fs.writeFileSync("itinerary.html", await page.content());
+  try { fs.writeFileSync("after-search.png", await page.screenshot({ fullPage: false, timeout: 8000 })); } catch (e) { console.log("[收尾] 截圖略過: " + e.message); }
+  try { fs.writeFileSync("itinerary.html", await page.content()); } catch (e) { console.log("[收尾] HTML 略過: " + e.message); }
   if (!entered) {
     console.error("[失敗] 多次驗證碼仍未通過，目前網址:", page.url());
     await browser.close();

@@ -51,6 +51,9 @@ export default function FlightBoard({ route }) {
   const isMobile = useIsMobile()
   const [showAll, setShowAll] = useState(() => !window.matchMedia('(max-width: 860px)').matches)
   const [sel, setSel] = useState(null) // { date, bucket }
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   const dep = route?.dep
   const arr = route?.arr
@@ -75,11 +78,37 @@ export default function FlightBoard({ route }) {
       .catch((e) => { if (!cancelled) setError('抓取失敗: ' + e.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [dep, arr, ym.y, ym.m])
+  }, [dep, arr, ym.y, ym.m, reloadKey])
 
   function prevMonth() { setYm((p) => (p.m === 1 ? { y: p.y - 1, m: 12 } : { y: p.y, m: p.m - 1 })) }
   function nextMonth() { setYm((p) => (p.m === 12 ? { y: p.y + 1, m: 1 } : { y: p.y, m: p.m + 1 })) }
   function goThisMonth() { setYm({ y: now.getFullYear(), m: now.getMonth() + 1 }) }
+
+  // 同步本月該航線: 呼叫 FlyTicketAPI /sync, 完成後重新載入該月資料。
+  //   起始日不早於明天(今日航班多已過會致華信初始搜尋失敗); 整月已過則無法同步。
+  async function doSync() {
+    if (!dep || !arr || syncing) return
+    const lastDaySync = new Date(ym.y, ym.m, 0).getDate()
+    const monthStart = ym.y + '-' + pad2(ym.m) + '-01'
+    const monthEnd = ym.y + '-' + pad2(ym.m) + '-' + pad2(lastDaySync)
+    const t = new Date(); t.setDate(t.getDate() + 1)
+    const tomorrowStr = t.getFullYear() + '-' + pad2(t.getMonth() + 1) + '-' + pad2(t.getDate())
+    const start = monthStart < tomorrowStr ? tomorrowStr : monthStart
+    if (start > monthEnd) { setSyncMsg('此月份已過，無法同步'); return }
+    setSyncing(true); setSyncMsg('')
+    const url = FLIGHTS + '/sync?start=' + start + '&end=' + monthEnd + '&pax=4&airline=all&dep=' + encodeURIComponent(dep) + '&arr=' + encodeURIComponent(arr)
+    try {
+      const r = await fetch(url)
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok || !d.ok) setSyncMsg('同步失敗: ' + (d.訊息 || d.error || ('HTTP ' + r.status)))
+      else setSyncMsg('同步完成')
+    } catch (e) {
+      setSyncMsg('同步失敗: ' + e.message)
+    } finally {
+      setSyncing(false)
+      setReloadKey((k) => k + 1)
+    }
+  }
 
   const lastDay = new Date(ym.y, ym.m, 0).getDate()
   const flights = data?.['航班'] || []
@@ -103,6 +132,11 @@ export default function FlightBoard({ route }) {
       <section className="gen-main">
         <header className="gen-main-header">
           <strong>{route ? (route.出發 + ' 往 ' + route.目的地 + ' （' + ym.y + ' 年' + ym.m + '月）') : '請選擇航線'}</strong>
+          {route && (
+            <button className="flt-sync-btn" onClick={doSync} disabled={syncing} title="同步本月航班">
+              {syncing ? '同步中…' : '同步'}
+            </button>
+          )}
         </header>
 
         <div className="flt-nav">
@@ -117,6 +151,7 @@ export default function FlightBoard({ route }) {
             <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
             顯示全部日期
           </label>
+          {syncMsg && <span className="flt-sync-msg">{syncMsg}</span>}
         </div>
 
         <div className="flt-legend">
