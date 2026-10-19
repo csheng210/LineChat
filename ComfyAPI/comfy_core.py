@@ -123,9 +123,16 @@ def fetch_image(img: dict) -> bytes:
         f"{HTTP_BASE}/view?filename={img['filename']}"
         f"&subfolder={img.get('subfolder', '')}&type={img.get('type', 'output')}"
     )
-    r = requests.get(url)
-    r.raise_for_status()
-    return r.content
+    last_err = None
+    for _ in range(5):
+        try:
+            r = requests.get(url, timeout=60)
+            r.raise_for_status()
+            return r.content
+        except requests.RequestException as e:
+            last_err = e
+            time.sleep(1.0)
+    raise RuntimeError(f"下載 ComfyUI 輸出失敗: {last_err}")
 
 
 def extract_text(node_output: dict) -> str:
@@ -216,14 +223,23 @@ def run_workflow(prompt: dict, save_node: str, preview_node: Optional[str], log=
         raise RuntimeError("ComfyUI 未完成就斷線")
 
     entry = {}
-    for _ in range(20):
-        hist = requests.get(f"{HTTP_BASE}/history/{state['prompt_id']}").json()
-        entry = hist.get(state["prompt_id"]) or {}
-        outs = entry.get("outputs", {})
-        ready = bool(outs.get(save_node, {}).get(output_key))
-        if ready and (preview_node is None or outs.get(preview_node)):
-            break
-        time.sleep(0.5)
+    last_err = None
+    # 遠端 ComfyUI 於大量生成(如放大到高解析度)時可能短時無法回應 /history,
+    # 這裡加上逐次 timeout 與重試, 避免單次逾時就讓整個任務失敗。
+    for _ in range(120):
+        try:
+            hist = requests.get(f"{HTTP_BASE}/history/{state['prompt_id']}", timeout=30).json()
+            entry = hist.get(state["prompt_id"]) or {}
+            outs = entry.get("outputs", {})
+            ready = bool(outs.get(save_node, {}).get(output_key))
+            if ready and (preview_node is None or outs.get(preview_node)):
+                last_err = None
+                break
+        except (requests.RequestException, ValueError) as e:
+            last_err = e
+        time.sleep(1.0)
+    if not entry.get("outputs") and last_err is not None:
+        raise RuntimeError(f"取得 ComfyUI 結果失敗: {last_err}")
     return entry.get("outputs", {})
 
 

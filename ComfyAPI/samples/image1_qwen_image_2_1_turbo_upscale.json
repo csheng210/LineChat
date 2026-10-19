@@ -1,0 +1,185 @@
+{
+  "480": {
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "載入擴散模型"
+    }
+  },
+  "481": {
+    "inputs": {
+      "prompt": "Enhance this image to high resolution while preserving the original composition, lighting, and atmosphere. Image can be illustration or real photo, keep the original input style.",
+      "negative_prompt": "",
+      "resolution": 1024,
+      "clip": [
+        "482",
+        0
+      ],
+      "images.image_1": [
+        "495",
+        0
+      ],
+      "vae": [
+        "483",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "_meta": {
+      "title": "文字編碼 Qwen Image 2.1"
+    }
+  },
+  "482": {
+    "inputs": {
+      "clip_name": "qwen3vl_8b_fp8_scaled.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "載入 CLIP"
+    }
+  },
+  "483": {
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "載入 VAE"
+    }
+  },
+  "485": {
+    "inputs": {
+      "width": [
+        "500",
+        0
+      ],
+      "height": [
+        "499",
+        0
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "空白潛在影像"
+    }
+  },
+  "491": {
+    "inputs": {
+      "samples": [
+        "492",
+        0
+      ],
+      "vae": [
+        "483",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAE 解碼"
+    }
+  },
+  "492": {
+    "inputs": {
+      "seed": 646102595585721,
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "480",
+        0
+      ],
+      "positive": [
+        "481",
+        0
+      ],
+      "negative": [
+        "481",
+        1
+      ],
+      "latent_image": [
+        "485",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "493": {
+    "inputs": {
+      "images": [
+        "491",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "預覽圖片"
+    }
+  },
+  "495": {
+    "inputs": {
+      "image": "S__37224455_0.jpg"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "載入圖片"
+    }
+  },
+  "496": {
+    "inputs": {
+      "image": [
+        "495",
+        0
+      ]
+    },
+    "class_type": "GetImageSize",
+    "_meta": {
+      "title": "取得圖片尺寸"
+    }
+  },
+  "499": {
+    "inputs": {
+      "expression": "b * min(4, sqrt((2048*2048)/(a*b)))",
+      "a": [
+        "496",
+        0
+      ],
+      "b": [
+        "496",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  },
+  "500": {
+    "inputs": {
+      "expression": "a * min(4, sqrt((2048*2048)/(a*b)))",
+      "a": [
+        "496",
+        0
+      ],
+      "b": [
+        "496",
+        1
+      ]
+    },
+    "class_type": "MathExpression|pysssss",
+    "_meta": {
+      "title": "Math Expression 🐍"
+    }
+  }
+}

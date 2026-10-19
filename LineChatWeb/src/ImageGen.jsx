@@ -63,8 +63,8 @@ export default function ImageGen({ active }) {
   }
 
   function validate() {
-    if (active !== 'bgremove' && !prompt.trim()) return '請輸入提示詞'
-    if ((active === 'image1' || active === 'bgremove') && !image1) return '請選擇輸入圖'
+    if (active !== 'bgremove' && active !== 'upscale' && !prompt.trim()) return '請輸入提示詞'
+    if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
     return ''
@@ -139,9 +139,10 @@ export default function ImageGen({ active }) {
         } else {
           if (width !== '' && width != null) form.append('width', String(Number(width)))
           if (height !== '' && height != null) form.append('height', String(Number(height)))
-          if (active === 'image1' || active === 'bgremove') {
+          if (active === 'image1' || active === 'bgremove' || active === 'upscale') {
             form.append('image', image1)
-            res = await fetch(COMFY + (active === 'bgremove' ? '/job/bgremove' : '/job/image1'), { method: 'POST', body: form })
+            const ep = active === 'bgremove' ? '/job/bgremove' : active === 'upscale' ? '/job/upscale' : '/job/image1'
+            res = await fetch(COMFY + ep, { method: 'POST', body: form })
           } else {
             form.append('image1', image1)
             form.append('image2', image2)
@@ -184,7 +185,7 @@ export default function ImageGen({ active }) {
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = active === 'image2video' // 圖生影片才顯示秒數
-  const showImages = active === 'image1' || active === 'image2' || active === 'image2video' || active === 'bgremove'
+  const showImages = active === 'image1' || active === 'image2' || active === 'image2video' || active === 'bgremove' || active === 'upscale'
   const pct = Math.round(progress * 100)
 
   return (
@@ -200,7 +201,7 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {(active === 'image2video' || active === 'bgremove') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {(active === 'image2video' || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
@@ -236,7 +237,7 @@ export default function ImageGen({ active }) {
             <textarea
               className="gen-textarea"
               rows={3}
-              placeholder={isVideo ? '例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : '例: 將圖片的沙發換成紅色')}
+              placeholder={isVideo ? '例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />

@@ -38,6 +38,7 @@ import run_image1_edit
 import run_image2_edit
 import run_image2video
 import run_bgremove_qwen
+import run_upscale_qwen
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -180,6 +181,28 @@ def bgremove(
     try:
         image_bytes, out_prompt = run_bgremove_qwen.generate(
             image_path=path, prompt=prompt, width=width, height=height, seed=seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    return _respond(image_bytes, out_prompt, as_json)
+
+
+@app.post("/upscale")
+def upscale(
+    image: UploadFile = File(..., description="輸入圖"),
+    prompt: Optional[str] = Form(None, description="提示詞（省略=預設增強提示）"),
+    seed: Optional[int] = Form(-1),
+    as_json: Optional[bool] = Form(False),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    try:
+        image_bytes, out_prompt = run_upscale_qwen.generate(
+            image_path=path, prompt=prompt, seed=seed, log=lambda *_: None
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -425,6 +448,33 @@ def job_bgremove(
         try:
             return run_bgremove_qwen.generate(
                 image_path=path, prompt=prompt, width=width, height=height, seed=seed,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _start_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/job/upscale")
+def job_upscale(
+    image: UploadFile = File(...),
+    prompt: Optional[str] = Form(None),
+    seed: Optional[int] = Form(-1),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_png(data)
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_upscale_qwen.generate(
+                image_path=path, prompt=prompt, seed=seed,
                 log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
         finally:
             try:

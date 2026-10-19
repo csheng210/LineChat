@@ -23,6 +23,16 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'upscale',
+    label: '放大圖片',
+    desc: '一張圖, 放大輸出高解析度圖(依原圖自動放大)',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+      </svg>
+    ),
+  },
+  {
     id: 'bgremove',
     label: '去背',
     desc: '一張圖, 去背後產出一張圖(依原圖長寬)',
