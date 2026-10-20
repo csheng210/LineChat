@@ -1,4 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { EMPTY_JOB, getSnapshot, startSync, stopSync, subscribe } from './flightSyncStore.js'
 
 // 航班資訊頁面: 仿生圖功能。左側 drawer 選航線(AuthGate 負責), 此處依選中航線
 //   以「月」為單位向 FlyTicketAPI /flights 抓取該月航班, 排成「時段×日期」表格。
@@ -8,6 +9,9 @@ import { useEffect, useState, useRef } from 'react'
 const FLIGHTS = '/flights-api'
 
 function pad2(n) { return String(n).padStart(2, '0') }
+
+// 星期字(索引對應 Date.getDay(): 0=日 ... 6=六), 日期欄顯示用
+const WEEKDAY = ['日', '一', '二', '三', '四', '五', '六']
 
 // 固定時段區間(單位: 小時)。出發時間依小時歸入對應區間。
 const TIME_BUCKETS = [
@@ -50,19 +54,16 @@ export default function FlightBoard({ route }) {
   const [error, setError] = useState('')
   const isMobile = useIsMobile()
   const [sel, setSel] = useState(null) // { date, bucket }
-  const [syncing, setSyncing] = useState(false)
-  const [syncMsg, setSyncMsg] = useState('')
-  const [reloadKey, setReloadKey] = useState(0)
-  const [progress, setProgress] = useState({ done: 0, total: 0 })
-  const [cancelling, setCancelling] = useState(false)
-  const jobRef = useRef(null)
-  const pollTimer = useRef(null)
-
-  // 卸載時清除輪詢計時器, 避免記憶體洩漏
-  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current) }, [])
+  const [selDay, setSelDay] = useState(null) // 點選日期欄: 該日全部航班(依出發時間排序)
+  const snap = useSyncExternalStore(subscribe, getSnapshot) // 同步任務狀態(store 層, 切頁再回來仍接得回)
 
   const dep = route?.dep
   const arr = route?.arr
+  const syncKey = dep && arr ? dep + '|' + arr : ''
+  const job = (syncKey && snap.jobs[syncKey]) || EMPTY_JOB
+  const syncing = job.busy
+  const cancelling = job.cancelling
+  const syncMsg = job.msg
 
   useEffect(() => {
     if (!dep || !arr) { setData(null); return }
@@ -70,6 +71,7 @@ export default function FlightBoard({ route }) {
     setLoading(true)
     setError('')
     setSel(null)
+    setSelDay(null)
     const lastDay = new Date(ym.y, ym.m, 0).getDate()
     const start = `${ym.y}-${pad2(ym.m)}-01`
     const end = `${ym.y}-${pad2(ym.m)}-${pad2(lastDay)}`
@@ -84,68 +86,16 @@ export default function FlightBoard({ route }) {
       .catch((e) => { if (!cancelled) setError('抓取失敗: ' + e.message) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [dep, arr, ym.y, ym.m, reloadKey])
+  }, [dep, arr, ym.y, ym.m, snap.reload])
 
   function prevMonth() { setYm((p) => (p.m === 1 ? { y: p.y - 1, m: 12 } : { y: p.y, m: p.m - 1 })) }
   function nextMonth() { setYm((p) => (p.m === 12 ? { y: p.y + 1, m: 1 } : { y: p.y, m: p.m + 1 })) }
   function goThisMonth() { setYm({ y: now.getFullYear(), m: now.getMonth() + 1 }) }
 
-  // 同步本月該航線: 呼叫 FlyTicketAPI /sync, 完成後重新載入該月資料。
-  //   起始日不早於明天(今日航班多已過會致華信初始搜尋失敗); 整月已過則無法同步。
-  async function doSync() {
-    if (!dep || !arr || syncing) return
-    const lastDaySync = new Date(ym.y, ym.m, 0).getDate()
-    const monthStart = ym.y + '-' + pad2(ym.m) + '-01'
-    const monthEnd = ym.y + '-' + pad2(ym.m) + '-' + pad2(lastDaySync)
-    const t = new Date(); t.setDate(t.getDate() + 1)
-    const tomorrowStr = t.getFullYear() + '-' + pad2(t.getMonth() + 1) + '-' + pad2(t.getDate())
-    const start = monthStart < tomorrowStr ? tomorrowStr : monthStart
-    if (start > monthEnd) { setSyncMsg('此月份已過，無法同步'); return }
-    setSyncing(true); setSyncMsg(''); setCancelling(false); setProgress({ done: 0, total: 0 })
-    const url = FLIGHTS + '/sync/start?start=' + start + '&end=' + monthEnd + '&pax=4&airline=all&dep=' + encodeURIComponent(dep) + '&arr=' + encodeURIComponent(arr)
-    try {
-      const r = await fetch(url)
-      const d = await r.json().catch(() => ({})).then((d) => ({ r, d }))
-      const { r: rr, d: dd } = d
-      if (!rr.ok || !dd.ok) { setSyncMsg('同步失敗: ' + (dd.訊息 || dd.error || ('HTTP ' + rr.status))); setSyncing(false); return }
-      jobRef.current = dd.jobId
-      setProgress({ done: 0, total: dd.航線數 || 0 })
-      pollStatus(dd.jobId)
-    } catch (e) {
-      setSyncMsg('同步失敗: ' + e.message)
-      setSyncing(false)
-    }
-  }
-
-  // 輪詢工作進度, 每 1.5 秒讀一次 /sync/status
-  function pollStatus(jobId) {
-    fetch(FLIGHTS + '/sync/status?jobId=' + encodeURIComponent(jobId))
-      .then((r) => r.json().catch(() => ({})).then((d) => ({ r, d })))
-      .then(({ r, d }) => {
-        if (!r.ok || !d.ok) { setSyncMsg('同步失敗: ' + (d.訊息 || ('HTTP ' + r.status))); finishSync(); return }
-        setProgress({ done: d.進度 || 0, total: d.總數 || 0 })
-        if (d.status === 'running') { pollTimer.current = setTimeout(() => pollStatus(jobId), 1500); return }
-        const sec = typeof d.耗時秒 === 'number' ? d.耗時秒 + ' 秒' : '? 秒'
-        if (d.status === 'done') setSyncMsg('同步完成 · 本次耗時 ' + sec)
-        else if (d.status === 'cancelled') setSyncMsg('已停止 · 本次耗時 ' + sec)
-        else setSyncMsg('同步失敗: ' + (d.訊息 || '發生錯誤'))
-        finishSync()
-      })
-      .catch((e) => { setSyncMsg('同步失敗: ' + e.message); finishSync() })
-  }
-
-  function finishSync() {
-    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null }
-    setSyncing(false)
-    setCancelling(false)
-    setReloadKey((k) => k + 1)
-  }
-
-  async function stopSync() {
-    if (!jobRef.current) return
-    setCancelling(true)
-    try { await fetch(FLIGHTS + '/sync/cancel?jobId=' + encodeURIComponent(jobRef.current)) } catch (e) {}
-  }
+  // 同步本月該航線: 任務與輪詢都在 flightSyncStore(模組層級),
+  //   切到首頁/生圖再切回來仍看得到同一任務的進度; 完成時 store 會 bump reload 觸發重抓資料。
+  function doSync() { startSync(syncKey, { dep, arr, y: ym }) }
+  function doStopSync() { stopSync(syncKey) }
 
   const lastDay = new Date(ym.y, ym.m, 0).getDate()
   const flights = data?.['航班'] || []
@@ -158,8 +108,12 @@ export default function FlightBoard({ route }) {
     ;(cell[key] || (cell[key] = [])).push(f)
   }
 
+  const byTime = (a, b) => String(a['出發時間']).localeCompare(String(b['出發時間']))
   const selList = sel
-    ? (cell[sel.date + '|' + sel.bucket] || []).slice().sort((a, b) => String(a['出發時間']).localeCompare(String(b['出發時間'])))
+    ? (cell[sel.date + '|' + sel.bucket] || []).slice().sort(byTime)
+    : []
+  const dayList = selDay
+    ? flights.filter((f) => f['日期'] === selDay).slice().sort(byTime)
     : []
 
   return (
@@ -171,7 +125,7 @@ export default function FlightBoard({ route }) {
             <div className="flt-sync-wrap">
               <div className="flt-sync-row">
                 {syncing ? (
-                  <button className="flt-sync-btn flt-sync-stop" onClick={stopSync} disabled={cancelling} title="停止同步">
+                  <button className="flt-sync-btn flt-sync-stop" onClick={doStopSync} disabled={cancelling} title="停止同步">
                     {cancelling ? '停止中…' : '停止'}
                   </button>
                 ) : (
@@ -180,8 +134,17 @@ export default function FlightBoard({ route }) {
               </div>
               {syncing && (
                 <div className="flt-sync-progress">
-                  <div className="flt-sync-bar"><div className="flt-sync-bar-fill" style={{ width: (progress.total > 0 ? Math.round(progress.done / progress.total * 100) : 0) + '%' }} /></div>
-                  <span className="flt-sync-prog-text">{progress.done}/{progress.total}</span>
+                  <div className="flt-sync-bar">
+                    <div className="flt-sync-bar-fill" style={{ width: (job.dayTotal > 0 ? Math.round(job.dayDone / job.dayTotal * 100) : 0) + '%' }} />
+                    {job.dayTotal > 1 && (
+                      <div
+                        className="flt-sync-bar-ticks"
+                        title={'航線 ' + job.done + '/' + job.total}
+                        style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent 0, transparent calc(' + (100 / job.dayTotal) + '% - 1px), rgba(255,255,255,0.7) calc(' + (100 / job.dayTotal) + '% - 1px), rgba(255,255,255,0.7) calc(' + (100 / job.dayTotal) + '%))' }}
+                      />
+                    )}
+                  </div>
+                  <span className="flt-sync-prog-text" title={'航線 ' + job.done + '/' + job.total}>{job.dayDone}/{job.dayTotal} 天</span>
                 </div>
               )}
               <span className="flt-sync-time">{lastUpdate ? '最後同步：' + lastUpdate : '尚未同步'}</span>
@@ -228,9 +191,16 @@ export default function FlightBoard({ route }) {
                       .map((day) => {
                         const dateStr = ym.y + '-' + pad2(ym.m) + '-' + pad2(day)
                         const isToday = dateStr === todayStr
+                        const dow = new Date(ym.y, ym.m - 1, day).getDay() // 0=週日, 6=週六
+                        const isWeekend = dow === 0 || dow === 6
                         return (
                           <tr key={day} className={isToday ? 'flt-row-today' : ''}>
-                            <th className="flt-day">{ym.m}/{day}{isToday ? ' ·今' : ''}</th>
+                            <th
+                              className={'flt-day flt-day-btn' + (isWeekend ? ' flt-day-weekend' : '') + (selDay === dateStr ? ' flt-day-active' : '')}
+                              onClick={() => setSelDay(dateStr)}
+                              role="button"
+                              title="查看當日全部航班"
+                            >{ym.m}/{day}（{WEEKDAY[dow]}）</th>
                             {TIME_BUCKETS.map((b, bi) => {
                               const list = cell[dateStr + '|' + bi]
                               let cls = 'flt-cell-empty', mark = ''
@@ -269,16 +239,16 @@ export default function FlightBoard({ route }) {
         )}
       </section>
 
-      {sel && (
+      {(sel || selDay) && (
         <>
-          <div className="flt-detail-backdrop" onClick={() => setSel(null)} />
+          <div className="flt-detail-backdrop" onClick={() => { setSel(null); setSelDay(null) }} />
           <div className="flt-detail" role="dialog" aria-label="航班明細">
             <div className="flt-detail-head">
-              <strong>{sel.date} {TIME_BUCKETS[sel.bucket].label}</strong>
-              <button className="flt-detail-close" onClick={() => setSel(null)} aria-label="關閉">✕</button>
+              <strong>{sel ? sel.date + ' ' + TIME_BUCKETS[sel.bucket].label : selDay + ' 全日航班'}</strong>
+              <button className="flt-detail-close" onClick={() => { setSel(null); setSelDay(null) }} aria-label="關閉">✕</button>
             </div>
             <div className="flt-detail-body">
-              {selList.map((f, i) => (
+              {(sel ? selList : dayList).map((f, i) => (
                 <div key={i} className={'flt-detail-row ' + (f['有無空位'] === '有' ? 'is-ok' : 'is-no')}>
                   <div className="flt-detail-airline">{f['航空公司']}</div>
                   <div className="flt-detail-main">

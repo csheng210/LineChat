@@ -3,6 +3,7 @@ import { checkAuth, login, logout } from './auth.js'
 import ImageGen from './ImageGen.jsx'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import { getSnapshot, hasRunningJob, subscribe } from './genStore.js'
+import { getSnapshot as getFltSnapshot, hasRunning as hasFlightSync, subscribe as fltSubscribe } from './flightSyncStore.js'
 import FlightBoard from './FlightBoard.jsx'
 import './AuthGate.css'
 
@@ -34,6 +35,8 @@ export default function AuthGate({ children }) {
   const popRef = useRef(null)
   const genSnap = useSyncExternalStore(subscribe, getSnapshot) // 生圖任務狀態(供 docker bar 顯示進行中標記)
   const genBusy = hasRunningJob(genSnap)
+  const fltSnap = useSyncExternalStore(fltSubscribe, getFltSnapshot) // 航班同步任務狀態
+  const fltBusy = hasFlightSync(fltSnap)
 
   useEffect(() => {
     checkAuth().then(({ authed, user }) => {
@@ -126,9 +129,9 @@ export default function AuthGate({ children }) {
             </button>
 
             <button
-              className={'auth-dock-btn' + (view === 'flights' ? ' on' : '')}
+              className={'auth-dock-btn' + (view === 'flights' ? ' on' : '') + (fltBusy ? ' busy' : '')}
               onClick={() => setView('flights')}
-              title="航班"
+              title={fltBusy ? '航班(同步進行中)' : '航班'}
               aria-label="航班"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" stroke="none" aria-hidden="true">

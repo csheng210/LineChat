@@ -130,6 +130,7 @@ function newJob(meta) {
   const job = {
     id, status: "running", createdAt: Date.now(), finishedAt: null,
     total: 0, done: 0, cancelled: false,
+    totalDays: 0, doneDays: 0, // 天等級進度: 航線數 x 日期範圍天數, 子程序每抓完一天 +1
     日期範圍: meta.日期範圍, 人數: meta.人數, 結果: [], 耗時秒: 0, 訊息: "",
     children: new Set(),
   };
@@ -141,6 +142,7 @@ function jobSummary(job) {
   return {
     jobId: job.id, status: job.status,
     進度: job.done, 總數: job.total,
+    天進度: job.doneDays, 天總數: job.totalDays,
     航線數: job.total, 成功數: okCount, 失敗數: job.結果.length - okCount,
     總筆數: job.結果.reduce((s, r) => s + r.筆數, 0),
     耗時秒: Math.round(((job.finishedAt || Date.now()) - job.createdAt) / 1000),
@@ -156,7 +158,7 @@ setInterval(() => {
 }, 1800000).unref();
 
 function runScraper(airlineKey, route, start, end, pax, timeoutMs, opts = {}) {
-  const { onChild, isCancelled } = opts;
+  const { onChild, isCancelled, onDay } = opts;
   return new Promise((resolve) => {
     const cfg = AIRLINES[airlineKey];
     if (isCancelled && isCancelled()) {
@@ -168,9 +170,17 @@ function runScraper(airlineKey, route, start, end, pax, timeoutMs, opts = {}) {
     const started = Date.now();
     const child = spawn("node", args, { cwd: cfg.cwd });
     if (onChild) onChild(child, "add");
-    let out = "", err = "";
+    let out = "", err = "", pending = "";
     const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch (e) {} }, timeoutMs);
-    child.stdout.on("data", (b) => { out += b.toString(); });
+    child.stdout.on("data", (b) => {
+      const chunk = b.toString();
+      out += chunk;
+      if (!onDay) return;
+      pending += chunk; // 逐行解析: 子程序每抓完一天印 [抓取] YYYY-MM-DD: N 筆
+      const lines = pending.split(/\r?\n/);
+      pending = lines.pop();
+      for (const line of lines) if (/\[抓取\]\s*\d{4}-\d{2}-\d{2}:/.test(line)) onDay();
+    });
     child.stderr.on("data", (b) => { err += b.toString(); });
     child.on("close", (code) => {
       clearTimeout(timer);
@@ -201,8 +211,9 @@ async function runQueue(tasks, concurrency, timeoutMs, job) {
   const results = new Array(tasks.length);
   const isCancelled = job ? () => job.cancelled : undefined;
   const onChild = job ? (child, op) => { if (op === "add") job.children.add(child); else job.children.delete(child); } : undefined;
+  const onDay = job ? () => { if (job.doneDays < job.totalDays) job.doneDays++; } : undefined;
   const runIdx = async (idx) => {
-    const r = await runScraper(tasks[idx].airline, tasks[idx].route, tasks[idx].start, tasks[idx].end, tasks[idx].pax, timeoutMs, { onChild, isCancelled });
+    const r = await runScraper(tasks[idx].airline, tasks[idx].route, tasks[idx].start, tasks[idx].end, tasks[idx].pax, timeoutMs, { onChild, isCancelled, onDay });
     results[idx] = r;
     if (job) { job.結果.push(r); job.done++; }
   };
@@ -225,6 +236,14 @@ async function runQueue(tasks, concurrency, timeoutMs, job) {
 
   await Promise.all([otherP, mandarinP]);
   return results;
+}
+
+// 日期範圍天數(含首末), 供天等級進度分母
+function daysInRange(startYmd, endYmd) {
+  const a = Date.parse(startYmd + "T00:00:00");
+  const b = Date.parse(endYmd + "T00:00:00");
+  if (isNaN(a) || isNaN(b)) return 1;
+  return Math.max(1, Math.round((b - a) / 86400000) + 1);
 }
 
 // 解析同步參數 -> { tasks, start, end, pax, concurrency, timeoutMs } 或 { error }
@@ -254,7 +273,8 @@ function startSync(req, res) {
   if (built.error) return res.status(400).json({ ok: false, 訊息: built.error });
   const job = newJob({ 日期範圍: { start: built.start.ymd, end: built.end.ymd }, 人數: built.pax });
   job.total = built.tasks.length;
-  res.json({ ok: true, jobId: job.id, 航線數: job.total });
+  job.totalDays = built.tasks.length * daysInRange(built.start.ymd, built.end.ymd);
+  res.json({ ok: true, jobId: job.id, 航線數: job.total, 天總數: job.totalDays });
   // 背景執行, 不 await -> 前端輪詢 /sync/status
   runQueue(built.tasks, built.concurrency, built.timeoutMs, job).then(() => {
     job.status = job.cancelled ? "cancelled" : "done";
@@ -300,6 +320,7 @@ app.get("/sync", async (req, res) => {
   if (built.error) return res.status(400).json({ ok: false, 訊息: built.error });
   const job = newJob({ 日期範圍: { start: built.start.ymd, end: built.end.ymd }, 人數: built.pax });
   job.total = built.tasks.length;
+  job.totalDays = built.tasks.length * daysInRange(built.start.ymd, built.end.ymd);
   await runQueue(built.tasks, built.concurrency, built.timeoutMs, job);
   job.status = job.cancelled ? "cancelled" : "done";
   job.finishedAt = Date.now();

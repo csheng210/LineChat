@@ -416,9 +416,10 @@
 .flt-sync-stop:disabled { background: #d8b4b0; border-color: #d8b4b0; }
 .flt-sync-row { display: flex; justify-content: flex-end; }
 .flt-sync-progress { display: flex; align-items: center; gap: 6px; width: 130px; }
-.flt-sync-bar { flex: 1; height: 8px; background: #e3e6e8; border-radius: 5px; overflow: hidden; }
+.flt-sync-bar { flex: 1; position: relative; height: 8px; background: #e3e6e8; border-radius: 5px; overflow: hidden; }
 .flt-sync-bar-fill { height: 100%; background: #0a8a3d; transition: width 0.4s ease; }
-.flt-sync-prog-text { font-size: 11px; color: #666; white-space: nowrap; min-width: 34px; text-align: right; }
+.flt-sync-bar-ticks { position: absolute; inset: 0; pointer-events: none; } /* 每天一刻度, 覆蓋在填充上 */
+.flt-sync-prog-text { font-size: 11px; color: #666; white-space: nowrap; min-width: 52px; text-align: right; }
 
 .flt-sync-msg {
   margin-left: auto;
@@ -1068,7 +1069,6 @@
   font-size: 12px;
   width: 100%;
   min-width: 100%;
-  table-layout: fixed;
 }
 
 .flt-table th,
@@ -1103,12 +1103,17 @@
   z-index: 1;
 }
 
+.flt-day-weekend { color: #d92b2b; } /* 週六/週日日期文字 */
+
+.flt-day-btn { cursor: pointer; }
+.flt-day-btn:hover { background: #e8f4ee; text-decoration: underline; }
+.flt-day-active { background: #e0f0e8; box-shadow: inset 3px 0 0 #0a8a3d; }
+
 .flt-day-head,
-.flt-day { width: 64px; }
+.flt-day { width: 84px; } /* 桌面: 容得下「10/9（五）」 */
 
 .flt-cell {
-  min-width: 30px;
-  height: 26px;
+  height: 30px;
 }
 
 .flt-cell-empty {
@@ -1142,6 +1147,28 @@
 .flt-legend-hint { color: #999; }
 
 .flt-table-wrap { -webkit-overflow-scrolling: touch; }
+
+/* 手機: 8 欄(日期+7 時段)收攏到一頁可見, 不橫向捲動 */
+@media (max-width: 860px) {
+  .flt-table { font-size: 10px; }
+  .flt-table th,
+  .flt-table td { padding: 2px 1px; }
+  .flt-day-head,
+  .flt-day { width: 48px; font-size: 8px; white-space: normal; word-break: break-all; }
+  .flt-time-head { font-size: 9px; letter-spacing: 0; }
+  .flt-cell { height: 24px; }
+  .flt-cell-ok .flt-dot,
+  .flt-cell-ok .flt-dot-blue,
+  .flt-cell-no .flt-cross { width: 11px; height: 11px; }
+  .flt-cell-ok .flt-dot-both { width: 12px; height: 12px; }
+  .flt-dot-num,
+  .flt-cross-num { font-size: 7px; }
+  @media (max-width: 400px) {
+    .flt-day-head,
+    .flt-day { width: 44px; }
+  }
+  .flt-dot-both-num { font-size: 8px; }
+}
 .flt-day, .flt-day-head { box-shadow: 1px 0 0 #e6e6e6; }
 
 .flt-row-today .flt-day { color: #06c755; }
