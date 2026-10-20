@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 
 // 航班資訊頁面: 仿生圖功能。左側 drawer 選航線(AuthGate 負責), 此處依選中航線
 //   以「月」為單位向 FlyTicketAPI /flights 抓取該月航班, 排成「時段×日期」表格。
@@ -49,11 +49,17 @@ export default function FlightBoard({ route }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const isMobile = useIsMobile()
-  const [showAll, setShowAll] = useState(() => !window.matchMedia('(max-width: 860px)').matches)
   const [sel, setSel] = useState(null) // { date, bucket }
   const [syncing, setSyncing] = useState(false)
   const [syncMsg, setSyncMsg] = useState('')
   const [reloadKey, setReloadKey] = useState(0)
+  const [progress, setProgress] = useState({ done: 0, total: 0 })
+  const [cancelling, setCancelling] = useState(false)
+  const jobRef = useRef(null)
+  const pollTimer = useRef(null)
+
+  // 卸載時清除輪詢計時器, 避免記憶體洩漏
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current) }, [])
 
   const dep = route?.dep
   const arr = route?.arr
@@ -95,19 +101,50 @@ export default function FlightBoard({ route }) {
     const tomorrowStr = t.getFullYear() + '-' + pad2(t.getMonth() + 1) + '-' + pad2(t.getDate())
     const start = monthStart < tomorrowStr ? tomorrowStr : monthStart
     if (start > monthEnd) { setSyncMsg('此月份已過，無法同步'); return }
-    setSyncing(true); setSyncMsg('')
-    const url = FLIGHTS + '/sync?start=' + start + '&end=' + monthEnd + '&pax=4&airline=all&dep=' + encodeURIComponent(dep) + '&arr=' + encodeURIComponent(arr)
+    setSyncing(true); setSyncMsg(''); setCancelling(false); setProgress({ done: 0, total: 0 })
+    const url = FLIGHTS + '/sync/start?start=' + start + '&end=' + monthEnd + '&pax=4&airline=all&dep=' + encodeURIComponent(dep) + '&arr=' + encodeURIComponent(arr)
     try {
       const r = await fetch(url)
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok || !d.ok) setSyncMsg('同步失敗: ' + (d.訊息 || d.error || ('HTTP ' + r.status)))
-      else setSyncMsg('同步完成')
+      const d = await r.json().catch(() => ({})).then((d) => ({ r, d }))
+      const { r: rr, d: dd } = d
+      if (!rr.ok || !dd.ok) { setSyncMsg('同步失敗: ' + (dd.訊息 || dd.error || ('HTTP ' + rr.status))); setSyncing(false); return }
+      jobRef.current = dd.jobId
+      setProgress({ done: 0, total: dd.航線數 || 0 })
+      pollStatus(dd.jobId)
     } catch (e) {
       setSyncMsg('同步失敗: ' + e.message)
-    } finally {
       setSyncing(false)
-      setReloadKey((k) => k + 1)
     }
+  }
+
+  // 輪詢工作進度, 每 1.5 秒讀一次 /sync/status
+  function pollStatus(jobId) {
+    fetch(FLIGHTS + '/sync/status?jobId=' + encodeURIComponent(jobId))
+      .then((r) => r.json().catch(() => ({})).then((d) => ({ r, d })))
+      .then(({ r, d }) => {
+        if (!r.ok || !d.ok) { setSyncMsg('同步失敗: ' + (d.訊息 || ('HTTP ' + r.status))); finishSync(); return }
+        setProgress({ done: d.進度 || 0, total: d.總數 || 0 })
+        if (d.status === 'running') { pollTimer.current = setTimeout(() => pollStatus(jobId), 1500); return }
+        const sec = typeof d.耗時秒 === 'number' ? d.耗時秒 + ' 秒' : '? 秒'
+        if (d.status === 'done') setSyncMsg('同步完成 · 本次耗時 ' + sec)
+        else if (d.status === 'cancelled') setSyncMsg('已停止 · 本次耗時 ' + sec)
+        else setSyncMsg('同步失敗: ' + (d.訊息 || '發生錯誤'))
+        finishSync()
+      })
+      .catch((e) => { setSyncMsg('同步失敗: ' + e.message); finishSync() })
+  }
+
+  function finishSync() {
+    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null }
+    setSyncing(false)
+    setCancelling(false)
+    setReloadKey((k) => k + 1)
+  }
+
+  async function stopSync() {
+    if (!jobRef.current) return
+    setCancelling(true)
+    try { await fetch(FLIGHTS + '/sync/cancel?jobId=' + encodeURIComponent(jobRef.current)) } catch (e) {}
   }
 
   const lastDay = new Date(ym.y, ym.m, 0).getDate()
@@ -116,11 +153,9 @@ export default function FlightBoard({ route }) {
 
   // 彙整: 依時段區間做直欄, 依日期做列。同(日期,時段)若有多班, 合併成一個狀態圈。
   const cell = {} // key 日期|bucketIdx -> [航班]
-  const dayHas = {} // 日期 -> 有航班
   for (const f of flights) {
     const key = f['日期'] + '|' + bucketIndex(f['出發時間'])
     ;(cell[key] || (cell[key] = [])).push(f)
-    dayHas[f['日期']] = true
   }
 
   const selList = sel
@@ -133,9 +168,24 @@ export default function FlightBoard({ route }) {
         <header className="gen-main-header">
           <strong>{route ? (route.出發 + ' 往 ' + route.目的地 + ' （' + ym.y + ' 年' + ym.m + '月）') : '請選擇航線'}</strong>
           {route && (
-            <button className="flt-sync-btn" onClick={doSync} disabled={syncing} title="同步本月航班">
-              {syncing ? '同步中…' : '同步'}
-            </button>
+            <div className="flt-sync-wrap">
+              <div className="flt-sync-row">
+                {syncing ? (
+                  <button className="flt-sync-btn flt-sync-stop" onClick={stopSync} disabled={cancelling} title="停止同步">
+                    {cancelling ? '停止中…' : '停止'}
+                  </button>
+                ) : (
+                  <button className="flt-sync-btn" onClick={doSync} title="同步本月航班">同步</button>
+                )}
+              </div>
+              {syncing && (
+                <div className="flt-sync-progress">
+                  <div className="flt-sync-bar"><div className="flt-sync-bar-fill" style={{ width: (progress.total > 0 ? Math.round(progress.done / progress.total * 100) : 0) + '%' }} /></div>
+                  <span className="flt-sync-prog-text">{progress.done}/{progress.total}</span>
+                </div>
+              )}
+              <span className="flt-sync-time">{lastUpdate ? '最後同步：' + lastUpdate : '尚未同步'}</span>
+            </div>
           )}
         </header>
 
@@ -147,10 +197,6 @@ export default function FlightBoard({ route }) {
           <button className="flt-nav-btn" onClick={nextMonth} aria-label="下個月" title="下個月">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6" /></svg>
           </button>
-          <label className="flt-toggle">
-            <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} />
-            顯示全部日期
-          </label>
           {syncMsg && <span className="flt-sync-msg">{syncMsg}</span>}
         </div>
 
@@ -179,7 +225,6 @@ export default function FlightBoard({ route }) {
                   </thead>
                   <tbody>
                     {Array.from({ length: lastDay }, (_, i) => i + 1)
-                      .filter((day) => showAll || dayHas[ym.y + '-' + pad2(ym.m) + '-' + pad2(day)])
                       .map((day) => {
                         const dateStr = ym.y + '-' + pad2(ym.m) + '-' + pad2(day)
                         const isToday = dateStr === todayStr
@@ -190,7 +235,7 @@ export default function FlightBoard({ route }) {
                               const list = cell[dateStr + '|' + bi]
                               let cls = 'flt-cell-empty', mark = ''
                               if (list) {
-                                const n = list.length
+                                const n = list.filter((f) => f['有無空位'] === '有').length
                                 const cnt = n > 1 ? <span className="flt-dot-num">{n}</span> : null
                                 const okUni = list.some((f) => f['航空公司'] === '立榮航空' && f['有無空位'] === '有')
                                 const okMan = list.some((f) => f['航空公司'] === '華信航空' && f['有無空位'] === '有')

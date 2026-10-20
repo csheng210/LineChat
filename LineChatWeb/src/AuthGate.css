@@ -335,9 +335,22 @@
   color: #222;
 }
 
-.flt-sync-btn {
+.flt-sync-wrap {
   margin-left: auto;
-  align-self: center;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.flt-sync-time {
+  font-size: 11px;
+  color: #888;
+  white-space: nowrap;
+}
+
+.flt-sync-btn {
+  align-self: flex-end;
   padding: 5px 14px;
   font-size: 13px;
   font-weight: 600;
@@ -350,6 +363,14 @@
 }
 .flt-sync-btn:hover { background: #087a35; }
 .flt-sync-btn:disabled { background: #9bbfa8; border-color: #9bbfa8; cursor: default; }
+.flt-sync-stop { background: #c0392b; border-color: #c0392b; }
+.flt-sync-stop:hover { background: #a93226; }
+.flt-sync-stop:disabled { background: #d8b4b0; border-color: #d8b4b0; }
+.flt-sync-row { display: flex; justify-content: flex-end; }
+.flt-sync-progress { display: flex; align-items: center; gap: 6px; width: 130px; }
+.flt-sync-bar { flex: 1; height: 8px; background: #e3e6e8; border-radius: 5px; overflow: hidden; }
+.flt-sync-bar-fill { height: 100%; background: #0a8a3d; transition: width 0.4s ease; }
+.flt-sync-prog-text { font-size: 11px; color: #666; white-space: nowrap; min-width: 34px; text-align: right; }
 
 .flt-sync-msg {
   margin-left: auto;

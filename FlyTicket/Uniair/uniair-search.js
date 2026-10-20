@@ -9,6 +9,7 @@ import { chromium } from "playwright";
 import { solveCaptcha } from "./captcha.js";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 
 const URL = "https://www.uniair.com.tw/rwd/B2C/booking/ubk_search.aspx";
 
@@ -72,12 +73,21 @@ function parseDate(str) {
 
 // 載入搜尋頁、關 cookie、填啟程/目的地/日期/人數
 async function fillForm(page, { dep, arr, date, pax }) {
-  await page.goto(URL, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector("#ddl_DEP", { timeout: 30000 });
-  await page.waitForFunction(() => {
-    const d = document.querySelector("#ddl_DEP");
-    return d && d.options.length > 1;
-  }, { timeout: 30000 });
+  for (let load = 1; load <= 3; load++) {
+    try {
+      await page.goto(URL, { waitUntil: "domcontentloaded", timeout: 30000 });
+      await page.waitForSelector("#ddl_DEP", { timeout: 30000 });
+      await page.waitForFunction(() => {
+        const d = document.querySelector("#ddl_DEP");
+        return d && d.options.length > 1;
+      }, { timeout: 45000 });
+      break;
+    } catch (e) {
+      console.log(`[載入] 第 ${load} 次表單未就緒(${e.name})，重新載入搜尋頁...`);
+      await page.waitForTimeout(1500);
+      if (load === 3) throw e;
+    }
+  }
 
   await page.evaluate(() => {
     try {
@@ -116,6 +126,51 @@ async function fillForm(page, { dep, arr, date, pax }) {
   await page.waitForTimeout(150);
 }
 
+// 用真實 Chrome profile 啟動（headless 易被擋，真實 profile 最穩）
+function prepareProfile(srcDir, workDir) {
+  fs.mkdirSync(workDir, { recursive: true });
+  const xd = ["Cache", "Code Cache", "GPUCache", "Service Worker", "Crashpad", "component_crx_cache", "Default\\Cache", "Default\\Code Cache", "Default\\GPUCache", "Default\\Service Worker"];
+  const xf = ["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"];
+  const cmd = 'robocopy "' + srcDir + '" "' + workDir + '" /E /XD ' + xd.join(" ") + " /XF " + xf.join(" ") + " /NFL /NDL /NJH /NJS /R:1 /W:1";
+  try { execSync(cmd, { stdio: "ignore" }); }
+  catch (e) { const code = e && e.status; if (code >= 8) throw new Error("複製 Chrome profile 失敗 (robocopy code=" + code + ")"); }
+}
+
+async function launchPersistent({ userDataDir, profileDirectory, headless }) {
+  const launchArgs = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-background-networking",
+    "--disable-sync",
+    "--disable-component-update",
+    "--profile-directory=" + profileDirectory,
+  ];
+  const maxLaunch = 5;
+  for (let i = 1; i <= maxLaunch; i++) {
+    try {
+      return await chromium.launchPersistentContext(userDataDir, {
+        headless,
+        channel: "chrome",
+        args: launchArgs,
+        viewport: { width: 1280, height: 900 },
+        ignoreDefaultArgs: ["--enable-automation"],
+      });
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (/ProcessSingleton|SingletonLock|Singleton|already running|user-specified|cannot be used|failed to launch|target closed|Target page, context or browser has been closed|has been closed|process did exit/i.test(msg)) {
+        console.error("[啟動失敗] Chrome profile 被佔用: " + userDataDir + " (" + profileDirectory + ")");
+        console.error("  -> 請先完全關閉所有 Chrome 視窗與背景 process，再重跑。");
+        console.error("  第 " + i + "/" + maxLaunch + " 次重試，5 秒後...");
+        await new Promise((r) => setTimeout(r, 5000));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw new Error("無法啟動 Chrome persistent profile（profile 持續被佔用）");
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const dep = resolveCity(args.dep);
@@ -127,12 +182,13 @@ async function main() {
   const headless = !!args.headless;
   console.log(`[輸入] 啟程=${dep}(${CITY[dep]}) 目的地=${arr}(${CITY[arr]}) 日期=${date.str} 人數=${pax}`);
 
-  const browser = await chromium.launch({ headless });
-  const context = await browser.newContext({
-    viewport: { width: 1280, height: 900 },
-    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
-  });
-  const page = await context.newPage();
+  const realProfile = process.env.CHROME_REAL_PROFILE_DIR || "C:\\Users\\Administrator\\AppData\\Local\\Google\\Chrome\\User Data";
+  const profileDirectory = args.profileDirectory || process.env.CHROME_PROFILE || "Default";
+  const workProfile = args.profile || path.resolve(".chrome-profile");
+  console.log(`[profile] 複製真實 profile -> ${workProfile} (profile=${profileDirectory})`);
+  prepareProfile(realProfile, workProfile);
+  const context = await launchPersistent({ userDataDir: workProfile, profileDirectory, headless });
+  const page = context.pages()[0] || await context.newPage();
 
   const capImgSel = "#c_b2c_booking_ubk_search_cph_body_logincaptcha_CaptchaImage";
   const maxTries = parseInt(args.captchaTries || "6", 10);
@@ -168,7 +224,7 @@ async function main() {
       try { const capEl = await page.$(capImgSel); if (capEl) fs.writeFileSync(path.resolve("captcha-live.png"), await capEl.screenshot()); } catch (e) {}
       console.log(`[暫停] 模型辨識碼=${code} 已填入, 尚未按搜尋。`);
       console.log(`[暫停] 送給模型的圖(放大4倍)= captcha.png ; 網頁原始驗證碼圖= captcha-live.png`);
-      await browser.close();
+      await context.close();
       process.exit(0);
     }
 
@@ -200,7 +256,7 @@ async function main() {
   try { fs.writeFileSync("itinerary.html", await page.content()); } catch (e) { console.log("[收尾] HTML 略過: " + e.message); }
   if (!entered) {
     console.error("[失敗] 多次驗證碼仍未通過，目前網址:", page.url());
-    await browser.close();
+    await context.close();
     process.exit(2);
   }
   console.log("[完成] 已進入航班頁:", page.url());
@@ -228,7 +284,7 @@ async function main() {
     console.log("[keep-open] 瀏覽器保持開啟，按 Ctrl+C 結束");
     await page.waitForTimeout(1000 * 60 * 10);
   }
-  await browser.close();
+  await context.close();
 }
 
 // 中文月名 -> 數字

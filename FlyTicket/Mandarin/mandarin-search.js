@@ -1,7 +1,7 @@
 // mandarin-search.js - 華信航空班機空位抓取
 // 搜尋頁輸入(無驗證碼) + 抓取航班存 JSON + 日期範圍(點日期列逐日)
 // 用法:
-//   node mandarin-search.js --dep 松山 --arr 金門 --date 2026-10-25 --pax 2
+//   node mandarin-search.js --dep 松山 --arr 澎湖 --date 2026-10-25 --pax 4
 //   範圍: --end-date 2026-10-29   選項: --headless --keep-open
 //   真實 Chrome profile(預設,headed): --profile <User Data 目錄> --profile-directory Default
 import "dotenv/config";

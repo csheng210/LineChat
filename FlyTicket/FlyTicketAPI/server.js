@@ -16,7 +16,7 @@ const PORT = parseInt(process.env.PORT || "8205", 10);
 
 // 航空設定：對應抓取腳本與工作目錄
 const AIRLINES = {
-  uniair: { 名稱: "立榮航空", prefix: "立榮", script: path.join(FLYROOT, "Uniair", "uniair-search.js"), cwd: path.join(FLYROOT, "Uniair"), headless: true },
+  uniair: { 名稱: "立榮航空", prefix: "立榮", script: path.join(FLYROOT, "Uniair", "uniair-search.js"), cwd: path.join(FLYROOT, "Uniair"), headless: false },
   mandarin: { 名稱: "華信航空", prefix: "華信", script: path.join(FLYROOT, "Mandarin", "mandarin-search.js"), cwd: path.join(FLYROOT, "Mandarin"), headless: false },
 };
 
@@ -31,6 +31,13 @@ function loadRoutes() {
   if (data.立榮航空) { add("uniair", data.立榮航空.出發澎湖); add("uniair", data.立榮航空.抵達澎湖); }
   if (data.華信航空) { add("mandarin", data.華信航空.出發澎湖); add("mandarin", data.華信航空.抵達澎湖); }
   return routes;
+}
+
+// 回傳該 dep->arr 航線在 澎湖航班.json 中實際有營運的業者 key
+function airlinesFor(depCode, arrCode) {
+  const set = new Set();
+  for (const r of loadRoutes()) { if (r.dep === depCode && r.arr === arrCode) set.add(r.airline); }
+  return [...set];
 }
 
 function parseDate(str) {
@@ -115,19 +122,59 @@ function readTickets(dep, arr, start, end, keys) {
 }
 
 // 執行單一航線抓取，回傳解析結果
-function runScraper(airlineKey, route, start, end, pax, timeoutMs) {
+// 背景同步工作儲存 (job-based): 前端啟動後輪詢進度, 可取消
+const jobs = new Map();
+let jobSeq = 0;
+function newJob(meta) {
+  const id = "job-" + Date.now().toString(36) + "-" + (++jobSeq);
+  const job = {
+    id, status: "running", createdAt: Date.now(), finishedAt: null,
+    total: 0, done: 0, cancelled: false,
+    日期範圍: meta.日期範圍, 人數: meta.人數, 結果: [], 耗時秒: 0, 訊息: "",
+    children: new Set(),
+  };
+  jobs.set(id, job);
+  return job;
+}
+function jobSummary(job) {
+  const okCount = job.結果.filter((r) => r.ok).length;
+  return {
+    jobId: job.id, status: job.status,
+    進度: job.done, 總數: job.total,
+    航線數: job.total, 成功數: okCount, 失敗數: job.結果.length - okCount,
+    總筆數: job.結果.reduce((s, r) => s + r.筆數, 0),
+    耗時秒: Math.round(((job.finishedAt || Date.now()) - job.createdAt) / 1000),
+    日期範圍: job.日期範圍, 人數: job.人數, 訊息: job.訊息, 結果: job.結果,
+  };
+}
+// 每 30 分鐘清理已結束的舊工作, 避免記憶體無限成長
+setInterval(() => {
+  const cutoff = Date.now() - 3600000;
+  for (const [id, job] of jobs) {
+    if (job.status !== "running" && (job.finishedAt || job.createdAt) < cutoff) jobs.delete(id);
+  }
+}, 1800000).unref();
+
+function runScraper(airlineKey, route, start, end, pax, timeoutMs, opts = {}) {
+  const { onChild, isCancelled } = opts;
   return new Promise((resolve) => {
     const cfg = AIRLINES[airlineKey];
+    if (isCancelled && isCancelled()) {
+      resolve({ airline: airlineKey, 名稱: cfg.名稱, 航線: route.航線, dep: route.dep, arr: route.arr, ok: false, exitCode: -2, 天數: 0, 筆數: 0, 檔案: [], 日期: [], 訊息: "已取消", 秒: 0 });
+      return;
+    }
     const args = [cfg.script, "--dep", route.dep, "--arr", route.arr, "--date", start.ymd, "--end-date", end.ymd, "--pax", String(pax)];
     if (cfg.headless) args.push("--headless");
     const started = Date.now();
     const child = spawn("node", args, { cwd: cfg.cwd });
+    if (onChild) onChild(child, "add");
     let out = "", err = "";
     const timer = setTimeout(() => { try { child.kill("SIGKILL"); } catch (e) {} }, timeoutMs);
     child.stdout.on("data", (b) => { out += b.toString(); });
     child.stderr.on("data", (b) => { err += b.toString(); });
     child.on("close", (code) => {
       clearTimeout(timer);
+      if (onChild) onChild(child, "remove");
       const files = [];
       const days = [];
       for (const line of out.split(/\r?\n/)) {
@@ -145,15 +192,19 @@ function runScraper(airlineKey, route, start, end, pax, timeoutMs) {
         秒: Math.round((Date.now() - started) / 1000),
       });
     });
-    child.on("error", (e) => { clearTimeout(timer); resolve({ airline: airlineKey, 名稱: cfg.名稱, 航線: route.航線, dep: route.dep, arr: route.arr, ok: false, exitCode: -1, 天數: 0, 筆數: 0, 檔案: [], 日期: [], 訊息: "spawn error: " + e.message, 秒: Math.round((Date.now() - started) / 1000) }); });
+    child.on("error", (e) => { clearTimeout(timer); if (onChild) onChild(child, "remove"); resolve({ airline: airlineKey, 名稱: cfg.名稱, 航線: route.航線, dep: route.dep, arr: route.arr, ok: false, exitCode: -1, 天數: 0, 筆數: 0, 檔案: [], 日期: [], 訊息: "spawn error: " + e.message, 秒: Math.round((Date.now() - started) / 1000) }); });
   });
 }
 
-// 簡易串行佇列，concurrency 控制平行數
-async function runQueue(tasks, concurrency, timeoutMs) {
+// 串行佇列, concurrency 控制平行數; 傳入 job 以更新進度並支援取消
+async function runQueue(tasks, concurrency, timeoutMs, job) {
   const results = new Array(tasks.length);
+  const isCancelled = job ? () => job.cancelled : undefined;
+  const onChild = job ? (child, op) => { if (op === "add") job.children.add(child); else job.children.delete(child); } : undefined;
   const runIdx = async (idx) => {
-    results[idx] = await runScraper(tasks[idx].airline, tasks[idx].route, tasks[idx].start, tasks[idx].end, tasks[idx].pax, timeoutMs);
+    const r = await runScraper(tasks[idx].airline, tasks[idx].route, tasks[idx].start, tasks[idx].end, tasks[idx].pax, timeoutMs, { onChild, isCancelled });
+    results[idx] = r;
+    if (job) { job.結果.push(r); job.done++; }
   };
   // mandarin 共用真實 Chrome profile 鎖 -> 必須串行(concurrency=1)
   const mandarinIdx = [];
@@ -162,16 +213,56 @@ async function runQueue(tasks, concurrency, timeoutMs) {
 
   let oi = 0;
   async function worker() {
-    while (oi < otherIdx.length) { const idx = otherIdx[oi++]; await runIdx(idx); }
+    while (oi < otherIdx.length) {
+      if (isCancelled && isCancelled()) break;
+      const idx = otherIdx[oi++];
+      await runIdx(idx);
+    }
   }
   const n = Math.max(1, Math.min(concurrency, otherIdx.length));
   const otherP = Promise.all(Array.from({ length: n }, worker));
-  const mandarinP = (async () => { for (const idx of mandarinIdx) await runIdx(idx); })();
+  const mandarinP = (async () => { for (const idx of mandarinIdx) { if (isCancelled && isCancelled()) break; await runIdx(idx); } })();
 
   await Promise.all([otherP, mandarinP]);
   return results;
 }
 
+// 解析同步參數 -> { tasks, start, end, pax, concurrency, timeoutMs } 或 { error }
+function buildSyncTasks(req) {
+  const start = parseDate(req.query.start);
+  const end = parseDate(req.query.end) || start;
+  if (!start) return { error: "需要 start 日期（例 2026-10-25）" };
+  if (end.ymd < start.ymd) return { error: "end 不可早於 start" };
+  const pax = Math.max(1, parseInt(req.query.pax || "4", 10));
+  const airline = (req.query.airline || "all").toLowerCase();
+  const concurrency = Math.max(1, Math.min(4, parseInt(req.query.concurrency || "1", 10)));
+  const timeoutMs = Math.max(60000, parseInt(req.query.timeoutMs || "600000", 10));
+  let routes = loadRoutes();
+  if (airline !== "all") routes = routes.filter((r) => r.airline === airline);
+  const depCode = req.query.dep ? resolveCityCode(req.query.dep) : null;
+  const arrCode = req.query.arr ? resolveCityCode(req.query.arr) : null;
+  if (depCode) routes = routes.filter((r) => r.dep === depCode);
+  if (arrCode) routes = routes.filter((r) => r.arr === arrCode);
+  if (!routes.length) return { error: "無符合的澎湖航線（airline 參數？）" };
+  const tasks = routes.map((r) => ({ airline: r.airline, route: r, start, end, pax }));
+  return { tasks, start, end, pax, concurrency, timeoutMs };
+}
+
+// GET/POST /sync/start?start=&end=&pax=4&airline=all&dep=&arr= -> { ok, jobId, 航線數 }
+function startSync(req, res) {
+  const built = buildSyncTasks(req);
+  if (built.error) return res.status(400).json({ ok: false, 訊息: built.error });
+  const job = newJob({ 日期範圍: { start: built.start.ymd, end: built.end.ymd }, 人數: built.pax });
+  job.total = built.tasks.length;
+  res.json({ ok: true, jobId: job.id, 航線數: job.total });
+  // 背景執行, 不 await -> 前端輪詢 /sync/status
+  runQueue(built.tasks, built.concurrency, built.timeoutMs, job).then(() => {
+    job.status = job.cancelled ? "cancelled" : "done";
+    job.finishedAt = Date.now();
+  }).catch((e) => {
+    job.status = "error"; job.finishedAt = Date.now(); job.訊息 = e.message;
+  });
+}
 const app = express();
 app.use(express.json());
 
@@ -182,40 +273,38 @@ app.get("/routes", (req, res) => {
   catch (e) { res.status(500).json({ ok: false, 訊息: e.message }); }
 });
 
-// GET /sync?start=2026-10-25&end=2026-10-29&pax=4&airline=all&concurrency=1&timeoutMs=600000
+app.get("/sync/start", startSync);
+app.post("/sync/start", startSync);
+
+// GET /sync/status?jobId= -> 進度/結果
+app.get("/sync/status", (req, res) => {
+  const job = jobs.get(req.query.jobId);
+  if (!job) return res.status(404).json({ ok: false, 訊息: "找不到工作 (jobId)" });
+  res.json({ ok: true, ...jobSummary(job) });
+});
+
+// GET/POST /sync/cancel?jobId= -> 停止 (殺進行中的抓取程序)
+function cancelSync(req, res) {
+  const job = jobs.get(req.query.jobId);
+  if (!job) return res.status(404).json({ ok: false, 訊息: "找不到工作 (jobId)" });
+  job.cancelled = true;
+  for (const child of job.children) { try { child.kill("SIGKILL"); } catch (e) {} }
+  res.json({ ok: true, jobId: job.id, status: job.status });
+}
+app.get("/sync/cancel", cancelSync);
+app.post("/sync/cancel", cancelSync);
+
+// GET /sync?... -> 同步版(向後相容): 直接跑完回傳
 app.get("/sync", async (req, res) => {
-  const start = parseDate(req.query.start);
-  const end = parseDate(req.query.end) || start;
-  if (!start) return res.status(400).json({ ok: false, 訊息: "需要 start 日期（例 2026-10-25）" });
-  if (end.ymd < start.ymd) return res.status(400).json({ ok: false, 訊息: "end 不可早於 start" });
-  const pax = Math.max(1, parseInt(req.query.pax || "4", 10));
-  const airline = (req.query.airline || "all").toLowerCase();
-  const concurrency = Math.max(1, Math.min(4, parseInt(req.query.concurrency || "1", 10)));
-  const timeoutMs = Math.max(60000, parseInt(req.query.timeoutMs || "600000", 10));
-
-  let routes = loadRoutes();
-  if (airline !== "all") routes = routes.filter((r) => r.airline === airline);
-  const depCode = req.query.dep ? resolveCityCode(req.query.dep) : null;
-  const arrCode = req.query.arr ? resolveCityCode(req.query.arr) : null;
-  if (depCode) routes = routes.filter((r) => r.dep === depCode);
-  if (arrCode) routes = routes.filter((r) => r.arr === arrCode);
-  if (!routes.length) return res.status(400).json({ ok: false, 訊息: "無符合的澎湖航線（airline 參數？）" });
-
-  const tasks = routes.map((r) => ({ airline: r.airline, route: r, start, end, pax }));
-  const t0 = Date.now();
-  const results = await runQueue(tasks, concurrency, timeoutMs);
-  const okCount = results.filter((r) => r.ok).length;
-  res.json({
-    ok: okCount === results.length,
-    日期範圍: { start: start.ymd, end: end.ymd },
-    人數: pax,
-    航線數: results.length,
-    成功數: okCount,
-    失敗數: results.length - okCount,
-    總筆數: results.reduce((s, r) => s + r.筆數, 0),
-    耗時秒: Math.round((Date.now() - t0) / 1000),
-    結果: results,
-  });
+  const built = buildSyncTasks(req);
+  if (built.error) return res.status(400).json({ ok: false, 訊息: built.error });
+  const job = newJob({ 日期範圍: { start: built.start.ymd, end: built.end.ymd }, 人數: built.pax });
+  job.total = built.tasks.length;
+  await runQueue(built.tasks, built.concurrency, built.timeoutMs, job);
+  job.status = job.cancelled ? "cancelled" : "done";
+  job.finishedAt = Date.now();
+  const sum = jobSummary(job);
+  res.json({ ok: sum.成功數 === job.total && job.total > 0, ...sum });
 });
 
 // GET /flights?dep=松山&arr=澎湖&start=2026-10-25&end=2026-10-29&airline=all
@@ -229,7 +318,10 @@ app.get("/flights", (req, res) => {
   if (!start) return res.status(400).json({ ok: false, 訊息: "需要 start 日期（例 2026-10-25）" });
   if (end.ymd < start.ymd) return res.status(400).json({ ok: false, 訊息: "end 不可早於 start" });
   const airline = (req.query.airline || "all").toLowerCase();
-  const keys = airline === "all" ? Object.keys(AIRLINES) : [airline];
+  const depCode = resolveCityCode(req.query.dep);
+  const arrCode = resolveCityCode(req.query.arr);
+  const 有航線 = airlinesFor(depCode, arrCode);
+  let keys = airline === "all" ? 有航線 : [airline].filter((k) => 有航線.includes(k));
   const { 檔案, all } = readTickets(dep, arr, start, end, keys);
   res.json({
     ok: true,
@@ -259,8 +351,10 @@ app.get("/flights-online", async (req, res) => {
   if (!start) return res.status(400).json({ ok: false, 訊息: "需要 start 日期（例 2026-10-25）" });
   if (end.ymd < start.ymd) return res.status(400).json({ ok: false, 訊息: "end 不可早於 start" });
   const airline = (req.query.airline || "all").toLowerCase();
-  const keys = airline === "all" ? Object.keys(AIRLINES) : [airline];
+  const 有航線 = airlinesFor(depCode, arrCode);
+  let keys = airline === "all" ? 有航線 : [airline].filter((k) => 有航線.includes(k));
   if (!keys.every((k) => AIRLINES[k])) return res.status(400).json({ ok: false, 訊息: "airline 參數不合法（uniair/mandarin/all）" });
+  if (!keys.length) return res.json({ ok: true, 即時: true, 出發: dep, 抵達: arr, 航線: dep + "\u2192" + arr, 日期範圍: { start: start.ymd, end: end.ymd }, 航空公司數: 0, 總筆數: 0, 航班: [], 檔案: [], 訊息: "該航線無業者營運（澎湖航班.json 無此航線）" });
 
   // 即時抓取（腳本會把航班整併寫入各 tickets/ 目錄）；mandarin 串行、uniair 平行
   const tasks = keys.map((k) => ({ airline: k, route: { dep: depCode, arr: arrCode }, start, end, pax }));

@@ -8,7 +8,8 @@ param(
   [int]$ApiPort = 0,
   [int]$ActionsPort = 0,
   [int]$WebPort = 0,
-  [int]$ComfyPort = 0
+  [int]$ComfyPort = 0,
+  [int]$FlyPort = 0
 )
 $ErrorActionPreference = 'Continue'
 $root       = $PSScriptRoot
@@ -17,6 +18,7 @@ $webDir     = Join-Path $root 'LineChatWeb'
 $actionsDir = Join-Path $root 'LineChatActions'
 $syncDir    = Join-Path $root 'LineChatEventHandle'
 $comfyDir   = Join-Path $root 'ComfyAPI'
+$flyDir     = Join-Path $root 'FlyTicket\FlyTicketAPI'
 
 # 從 .env 讀 key(忽略註解/export/引號)
 function Get-EnvValue([string]$path, [string]$key) {
@@ -46,6 +48,7 @@ $ApiPort     = Resolve-Port $ApiPort     (Join-Path $apiDir '.env')     'LINE_CH
 $ActionsPort = Resolve-Port $ActionsPort (Join-Path $actionsDir '.env') 'ACTIONS_PORT'       8202
 $WebPort     = Resolve-Port $WebPort     (Join-Path $webDir '.env')     'VITE_DEV_PORT'      8200
 $ComfyPort   = Resolve-Port $ComfyPort   (Join-Path $comfyDir '.env') 'COMFYAPI_PORT'      8204
+$FlyPort     = Resolve-Port $FlyPort     (Join-Path $flyDir '.env') 'PORT'             8205
 
 # 殺整棵程序樹(含承載服務的終端視窗與其 node/python 子程序)
 function Stop-Tree([int]$procId) {
@@ -62,7 +65,7 @@ function Kill-Once([int]$procId, [string]$why) {
   }
 }
 
-Write-Host "停止 LineChat 服務並關閉終端 (API=$ApiPort, Actions=$ActionsPort, Web=$WebPort, Comfy=$ComfyPort)..." -ForegroundColor Cyan
+Write-Host "停止 LineChat 服務並關閉終端 (API=$ApiPort, Actions=$ActionsPort, Web=$WebPort, Comfy=$ComfyPort, FlyTicket=$FlyPort)..." -ForegroundColor Cyan
 
 # (1) 依視窗標題殺: 開頭為 LineChat 的終端視窗(API/Actions/Web/Sync 四個)
 foreach ($proc in (Get-Process | Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle -like 'LineChat*' })) {
@@ -76,14 +79,14 @@ try {
       $_.CommandLine -and (
         $_.CommandLine -like '*LineChatAPI*' -or $_.CommandLine -like '*LineChatActions*' -or
         $_.CommandLine -like '*LineChatWeb*' -or $_.CommandLine -like '*LineChatEventHandle*' -or
-        $_.CommandLine -like '*ComfyAPI*'
+        $_.CommandLine -like '*ComfyAPI*' -or $_.CommandLine -like '*FlyTicketAPI*'
       )
     }
   foreach ($h in $hosts) { Kill-Once ([int]$h.ProcessId) '命令行=服務終端' }
 } catch { }
 
 # (3) 依監聽端口殺 owning 程序(API/Actions/Web 各自綁定 port)
-foreach ($port in @($ApiPort, $ActionsPort, $WebPort, $ComfyPort)) {
+foreach ($port in @($ApiPort, $ActionsPort, $WebPort, $ComfyPort, $FlyPort)) {
   try {
     $conns = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop
     foreach ($c in $conns) { Kill-Once ([int]$c.OwningProcess) "端口=$port" }
@@ -100,7 +103,7 @@ try {
 # 收尾: 確認端口已釋放
 Start-Sleep -Milliseconds 500
 $remain = @()
-foreach ($port in @($ApiPort, $ActionsPort, $WebPort, $ComfyPort)) {
+foreach ($port in @($ApiPort, $ActionsPort, $WebPort, $ComfyPort, $FlyPort)) {
   try { if (Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop) { $remain += $port } } catch { }
 }
 if ($remain.Count -eq 0) {
