@@ -1168,7 +1168,7 @@
   .flt-cell-ok .flt-dot,
   .flt-cell-ok .flt-dot-blue,
   .flt-cell-no .flt-cross { width: 11px; height: 11px; }
-  .flt-cell-ok .flt-dot-both { width: 12px; height: 12px; }
+  .flt-cell-ok .flt-dot-both { width: 11px; height: 11px; }
   .flt-dot-num,
   .flt-cross-num { font-size: 7px; }
   @media (max-width: 400px) {
@@ -1281,8 +1281,7 @@
   border-radius: 50%;
   background: #2f7ed8;
 }
-.flt-cell-ok .flt-dot-both { width: 18px; height: 18px; }
-.flt-cell-ok .flt-dot-blue { width: 16px; height: 16px; }
+
 
 .flt-dot-num { font-size: 9px; font-weight: 700; color: #0a8a3d; line-height: 1; }
 .flt-dot-blue .flt-dot-num { color: #2f7ed8; }
