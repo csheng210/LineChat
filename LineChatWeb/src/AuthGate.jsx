@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { checkAuth, login, logout } from './auth.js'
 import ImageGen from './ImageGen.jsx'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
+import { getSnapshot, hasRunningJob, subscribe } from './genStore.js'
 import FlightBoard from './FlightBoard.jsx'
 import './AuthGate.css'
 
@@ -31,6 +32,8 @@ export default function AuthGate({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(true) // 由 App 回報: 清單面板開合
   const [analysisOpen, setAnalysisOpen] = useState(true) // 由 App 回報: 分析面板開合
   const popRef = useRef(null)
+  const genSnap = useSyncExternalStore(subscribe, getSnapshot) // 生圖任務狀態(供 docker bar 顯示進行中標記)
+  const genBusy = hasRunningJob(genSnap)
 
   useEffect(() => {
     checkAuth().then(({ authed, user }) => {
@@ -110,9 +113,9 @@ export default function AuthGate({ children }) {
             </button>
 
             <button
-              className={'auth-dock-btn' + (view === 'imagegen' ? ' on' : '')}
+              className={'auth-dock-btn' + (view === 'imagegen' ? ' on' : '') + (genBusy ? ' busy' : '')}
               onClick={() => setView('imagegen')}
-              title="生圖"
+              title={genBusy ? '生圖(有任務進行中)' : '生圖'}
               aria-label="生圖"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -233,7 +236,7 @@ export default function AuthGate({ children }) {
                 <button
                   key={f.id}
                   role="menuitem"
-                  className={'gen-item' + (active === f.id ? ' active' : '')}
+                  className={'gen-item' + (active === f.id ? ' active' : '') + (genSnap.jobs[f.id] && genSnap.jobs[f.id].busy ? ' busy' : '')}
                   onClick={() => { setActive(f.id); if (isMobile()) setMenuOpen(false) }}
                 >
                   <span className="gen-item-icon">{f.icon}</span>

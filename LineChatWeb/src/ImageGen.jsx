@@ -1,12 +1,22 @@
-import { useEffect, useRef, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
+import {
+  DEFAULT_FORM,
+  DEFAULT_VIDEO_PROMPT,
+  EMPTY_JOB,
+  cancelJob,
+  getSnapshot,
+  notifyInvalid,
+  setForm,
+  startJob,
+  subscribe,
+} from './genStore.js'
 
 // ComfyUI 生圖/生影片頁面: 功能按鈕在 status bar(AuthGate), 此處依 active 產生表單與結果。
 //   經 Vite proxy /comfy/* -> ComfyAPI(FastAPI)。
-//   生成採非同步任務: POST /comfy/job/* 回 job_id, 前端輪詢 /comfy/job?id= 更新進度條, 完成顯示圖/影片。
+//   生成採非同步任務: POST /comfy/job/* 回 job_id, 由 genStore 輪詢 /comfy/job?id= 更新進度, 完成顯示圖/影片。
+//   任務與表單狀態存在 genStore(模組層級), 切到首頁/航班再切回來仍接得回同一任務的進度與結果。
 //   停止: POST /comfy/job/cancel?id= 中斷 ComfyUI 當前執行, 輪詢到 cancelled 顯示已停止。
-const COMFY = '/comfy'
-
 function fileToBase64Preview(file) {
   return new Promise((resolve) => {
     const reader = new FileReader()
@@ -16,156 +26,67 @@ function fileToBase64Preview(file) {
 }
 
 export default function ImageGen({ active }) {
-  const [prompt, setPrompt] = useState('')
-  const [width, setWidth] = useState(1024)
-  const [height, setHeight] = useState(1024)
-  const [seed, setSeed] = useState(-1)
-  const [duration, setDuration] = useState(8) // 圖生影片秒數
-  const [image1, setImage1] = useState(null) // File
-  const [image2, setImage2] = useState(null) // File
-  const [preview1, setPreview1] = useState('')
-  const [preview2, setPreview2] = useState('')
+  const snap = useSyncExternalStore(subscribe, getSnapshot)
+  const form = snap.forms[active] || DEFAULT_FORM
+  const job = snap.jobs[active] || EMPTY_JOB
 
-  const [busy, setBusy] = useState(false)
-  const [progress, setProgress] = useState(0) // 0..1
-  const [phase, setPhase] = useState('') // 進度文字(排隊中/生成中 xx%)
-  const [cancelling, setCancelling] = useState(false)
-  const [stopped, setStopped] = useState(false)
-  const [error, setError] = useState('')
-  const [result, setResult] = useState(null) // { image, prompt } 或 { video }
-
-  const jobRef = useRef(null) // 目前任務 id(供停止按鈕使用)
+  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2 } = form
+  const { busy, progress, phase, cancelling, stopped, error, result } = job
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
   const isVideo = active === 'image2video'
 
-  function resetResult() {
-    setResult(null)
-    setError('')
-    setProgress(0)
-    setPhase('')
-    setStopped(false)
-    setCancelling(false)
-  }
-
-  // 切換功能時重置結果與進度(功能按鈕已移到 status bar)
-  useEffect(() => { resetResult() }, [active])
-
   async function onPickImage(slot, file) {
     if (!file) {
-      if (slot === 1) { setImage1(null); setPreview1('') }
-      else { setImage2(null); setPreview2('') }
+      if (slot === 1) setForm(active, { image1: null, preview1: '' })
+      else setForm(active, { image2: null, preview2: '' })
       return
     }
     const url = await fileToBase64Preview(file)
-    if (slot === 1) { setImage1(file); setPreview1(url) }
-    else { setImage2(file); setPreview2(url) }
+    if (slot === 1) setForm(active, { image1: file, preview1: url })
+    else setForm(active, { image2: file, preview2: url })
   }
 
   function validate() {
-    if (active !== 'bgremove' && active !== 'upscale' && !prompt.trim()) return '請輸入提示詞'
+    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && !prompt.trim()) return '請輸入提示詞'
     if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
     return ''
   }
 
-  // 停止: 通知後端中斷當前 ComfyUI 執行(輪詢會收到 cancelled)。
-  async function stopJob() {
-    const id = jobRef.current
-    if (!id || cancelling) return
-    setCancelling(true)
-    setPhase('停止中…')
-    try {
-      await fetch(COMFY + '/job/cancel?id=' + encodeURIComponent(id), { method: 'POST' })
-    } catch {
-      setCancelling(false)
+  // 依功能組出送給後端的請求(text2img 走 JSON, 其餘走 multipart form)。
+  function buildRequest() {
+    if (active === 'text2img') {
+      return {
+        endpoint: '/job/text2img',
+        json: { prompt: prompt.trim(), width: Number(width), height: Number(height), seed: Number(seed) },
+      }
     }
+    const fd = new FormData()
+    fd.append('prompt', prompt.trim() || (isVideo ? DEFAULT_VIDEO_PROMPT : ''))
+    if (seed !== '' && seed != null) fd.append('seed', String(Number(seed)))
+    if (isVideo) {
+      fd.append('duration', String(Number(duration)))
+      fd.append('image', image1)
+      return { endpoint: '/job/image2video', form: fd }
+    }
+    if (width !== '' && width != null) fd.append('width', String(Number(width)))
+    if (height !== '' && height != null) fd.append('height', String(Number(height)))
+    if (active === 'image1' || active === 'bgremove' || active === 'upscale') {
+      fd.append('image', image1)
+      const ep = active === 'bgremove' ? '/job/bgremove' : active === 'upscale' ? '/job/upscale' : '/job/image1'
+      return { endpoint: ep, form: fd }
+    }
+    fd.append('image1', image1)
+    fd.append('image2', image2)
+    return { endpoint: '/job/image2', form: fd }
   }
 
-  // 輪詢任務進度, 直到 done / cancelled / error / 逾時。
-  async function pollJob(jobId) {
-    const start = Date.now()
-    const maxMs = 1800000 // 30 分鐘上限(影片生成較久)
-    while (Date.now() - start < maxMs) {
-      await new Promise((r) => setTimeout(r, 1000))
-      const res = await fetch(COMFY + '/job?id=' + encodeURIComponent(jobId))
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.detail || ('HTTP ' + res.status))
-      const p = typeof data.progress === 'number' ? data.progress : 0
-      setProgress(p)
-      if (data.status === 'done') {
-        if (data.video_base64) return { video: 'data:video/mp4;base64,' + data.video_base64 }
-        if (!data.image_base64) throw new Error('後端未回傳圖片')
-        return { image: 'data:image/png;base64,' + data.image_base64, prompt: data.prompt || '' }
-      }
-      if (data.status === 'cancelled') {
-        const e = new Error('已停止')
-        e.cancelled = true
-        throw e
-      }
-      if (data.status === 'error') throw new Error(data.error || '生成失敗')
-      setPhase(cancelling ? '停止中…' : data.status === 'queued' ? '排隊中…' : '生成中 ' + Math.round(p * 100) + '%')
-    }
-    throw new Error('生成逾時（等待超過上限）')
-  }
-
-  async function generate() {
+  function generate() {
     const v = validate()
-    if (v) { setError(v); setResult(null); return }
-    setBusy(true)
-    setError('')
-    setResult(null)
-    setStopped(false)
-    setCancelling(false)
-    setProgress(0)
-    setPhase('排隊中…')
-    try {
-      let res
-      if (active === 'text2img') {
-        res = await fetch(COMFY + '/job/text2img', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: prompt.trim(), width: Number(width), height: Number(height), seed: Number(seed) }),
-        })
-      } else {
-        const form = new FormData()
-        form.append('prompt', prompt.trim())
-        if (seed !== '' && seed != null) form.append('seed', String(Number(seed)))
-        if (active === 'image2video') {
-          form.append('duration', String(Number(duration)))
-          form.append('image', image1)
-          res = await fetch(COMFY + '/job/image2video', { method: 'POST', body: form })
-        } else {
-          if (width !== '' && width != null) form.append('width', String(Number(width)))
-          if (height !== '' && height != null) form.append('height', String(Number(height)))
-          if (active === 'image1' || active === 'bgremove' || active === 'upscale') {
-            form.append('image', image1)
-            const ep = active === 'bgremove' ? '/job/bgremove' : active === 'upscale' ? '/job/upscale' : '/job/image1'
-            res = await fetch(COMFY + ep, { method: 'POST', body: form })
-          } else {
-            form.append('image1', image1)
-            form.append('image2', image2)
-            res = await fetch(COMFY + '/job/image2', { method: 'POST', body: form })
-          }
-        }
-      }
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(data.detail || data.error || ('HTTP ' + res.status))
-      if (!data.job_id) throw new Error('後端未回傳 job_id')
-      jobRef.current = data.job_id
-      const out = await pollJob(data.job_id)
-      setProgress(1)
-      setResult(out)
-    } catch (err) {
-      if (err.cancelled) setStopped(true)
-      else setError('生成失敗: ' + err.message)
-    } finally {
-      setBusy(false)
-      setCancelling(false)
-      setPhase('')
-      jobRef.current = null
-    }
+    if (v) { notifyInvalid(active, v); return }
+    startJob(active, buildRequest())
   }
 
   // 儲存生成結果: dataURL 轉為檔案下載(圖片 PNG / 影片 MP4)。
@@ -184,8 +105,8 @@ export default function ImageGen({ active }) {
   }
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
-  const showDuration = active === 'image2video' // 圖生影片才顯示秒數
-  const showImages = active === 'image1' || active === 'image2' || active === 'image2video' || active === 'bgremove' || active === 'upscale'
+  const showDuration = isVideo // 圖生影片才顯示秒數
+  const showImages = active === 'image1' || active === 'image2' || isVideo || active === 'bgremove' || active === 'upscale'
   const pct = Math.round(progress * 100)
 
   return (
@@ -201,7 +122,7 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {(active === 'image2video' || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {(isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
@@ -237,9 +158,9 @@ export default function ImageGen({ active }) {
             <textarea
               className="gen-textarea"
               rows={3}
-              placeholder={isVideo ? '例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
+              placeholder={isVideo ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
               value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
+              onChange={(e) => setForm(active, { prompt: e.target.value })}
             />
           </label>
 
@@ -247,15 +168,15 @@ export default function ImageGen({ active }) {
             <div className="gen-row">
               <label className="gen-num">
                 <span className="gen-field-label">寬</span>
-                <input type="number" min="64" max="4096" value={width} onChange={(e) => setWidth(e.target.value)} />
+                <input type="number" min="64" max="4096" value={width} onChange={(e) => setForm(active, { width: e.target.value })} />
               </label>
               <label className="gen-num">
                 <span className="gen-field-label">高</span>
-                <input type="number" min="64" max="4096" value={height} onChange={(e) => setHeight(e.target.value)} />
+                <input type="number" min="64" max="4096" value={height} onChange={(e) => setForm(active, { height: e.target.value })} />
               </label>
               <label className="gen-num">
                 <span className="gen-field-label">種子(-1 隨機)</span>
-                <input type="number" value={seed} onChange={(e) => setSeed(e.target.value)} />
+                <input type="number" value={seed} onChange={(e) => setForm(active, { seed: e.target.value })} />
               </label>
             </div>
           )}
@@ -264,11 +185,11 @@ export default function ImageGen({ active }) {
             <div className="gen-row">
               <label className="gen-num">
                 <span className="gen-field-label">秒數</span>
-                <input type="number" min="5" max="60" value={duration} onChange={(e) => setDuration(e.target.value)} />
+                <input type="number" min="5" max="60" value={duration} onChange={(e) => setForm(active, { duration: e.target.value })} />
               </label>
               <label className="gen-num">
                 <span className="gen-field-label">種子(-1 隨機)</span>
-                <input type="number" value={seed} onChange={(e) => setSeed(e.target.value)} />
+                <input type="number" value={seed} onChange={(e) => setForm(active, { seed: e.target.value })} />
               </label>
             </div>
           )}
@@ -278,7 +199,7 @@ export default function ImageGen({ active }) {
               {busy ? '生成中…' : '生成'}
             </button>
             {busy && (
-              <button className="gen-stop" onClick={stopJob} disabled={cancelling}>
+              <button className="gen-stop" onClick={() => cancelJob(active)} disabled={cancelling}>
                 {cancelling ? '停止中…' : '停止'}
               </button>
             )}
@@ -317,7 +238,7 @@ export default function ImageGen({ active }) {
               )}
             </>
           ) : (
-            !busy && !stopped && <p className="gen-hint">選擇功能、填寫內容後按「生成」, 結果將顯示於此。</p>
+            !busy && !stopped && <p className="gen-hint">選擇功能、填寫內容後按「生成」, 結果將顯示於此。生成中可切到其他頁面, 回來會接回同一個任務。</p>
           )}
         </div>
       </section>

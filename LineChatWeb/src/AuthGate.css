@@ -280,6 +280,54 @@
   background: #eaf7ef;
 }
 
+/* 生圖任務進行中: docker bar 圖示與功能清單顯示脈動小點(切到別的頁面也知道還在跑) */
+.auth-dock-btn.busy {
+  position: relative;
+  color: #06c755;
+}
+
+.auth-dock-btn.busy::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #06c755;
+  animation: gen-busy-pulse 1.2s ease-in-out infinite;
+}
+
+.gen-item.busy {
+  position: relative;
+  border-color: #b9e6cb;
+}
+
+.gen-item.busy::after {
+  content: "";
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #06c755;
+  animation: gen-busy-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gen-busy-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+
 /* 航班航線選單: 偶數列淡灰底色 */
 .gen-drawer-flights .gen-item:nth-child(4n):not(.active),
 .gen-drawer-flights .gen-item:nth-child(4n+1):not(.active) {
