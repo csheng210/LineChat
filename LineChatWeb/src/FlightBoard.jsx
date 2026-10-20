@@ -115,6 +115,7 @@ export default function FlightBoard({ route }) {
   const dayList = selDay
     ? flights.filter((f) => f['日期'] === selDay).slice().sort(byTime)
     : []
+  const activeDate = selDay || (sel && sel.date) // 高亮整列用(橘紅框)
 
   return (
     <div className="gen-page">
@@ -194,10 +195,10 @@ export default function FlightBoard({ route }) {
                         const dow = new Date(ym.y, ym.m - 1, day).getDay() // 0=週日, 6=週六
                         const isWeekend = dow === 0 || dow === 6
                         return (
-                          <tr key={day} className={isToday ? 'flt-row-today' : ''}>
+                          <tr key={day} className={(isToday ? 'flt-row-today' : '') + (activeDate === dateStr ? ' flt-row-active' : '')}>
                             <th
                               className={'flt-day flt-day-btn' + (isWeekend ? ' flt-day-weekend' : '') + (selDay === dateStr ? ' flt-day-active' : '')}
-                              onClick={() => setSelDay(dateStr)}
+                              onClick={() => { setSel(null); setSelDay(dateStr) }}
                               role="button"
                               title="查看當日全部航班"
                             ><span className="flt-day-date">{ym.m}/{day}</span><span className="flt-day-wd">（{WEEKDAY[dow]}）</span></th>
