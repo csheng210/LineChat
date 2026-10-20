@@ -4,3 +4,9 @@ node_modules/
 flightlist.json
 _probe*.html
 .chrome-profile/
+flightlist-probe.json
+fare-page.html
+fare-view.json
+_p*.cjs
+probe-run.log
+route-fares*.log

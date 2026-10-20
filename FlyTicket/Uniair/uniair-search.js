@@ -6,12 +6,14 @@
 //   選項: --headless  --keep-open  --captcha 483021  --captcha-tries 6
 import "dotenv/config";
 import { chromium } from "playwright";
+import { fileURLToPath } from "url";
 import { solveCaptcha } from "./captcha.js";
 import fs from "fs";
 import path from "path";
 import { execSync } from "child_process";
 
 const URL = "https://www.uniair.com.tw/rwd/B2C/booking/ubk_search.aspx";
+export const CAPTCHA_IMG_SEL = "#c_b2c_booking_ubk_search_cph_body_logincaptcha_CaptchaImage";
 
 // 用瀏覽器 canvas 把驗證碼放大後再截圖 (量化視覺模型對小圖 OCR 不穩, 放大可大幅提升辨識率)
 async function captureCaptchaUpscaled(page, sel, scale = 4) {
@@ -132,8 +134,16 @@ function prepareProfile(srcDir, workDir) {
   const xd = ["Cache", "Code Cache", "GPUCache", "Service Worker", "Crashpad", "component_crx_cache", "Default\\Cache", "Default\\Code Cache", "Default\\GPUCache", "Default\\Service Worker"];
   const xf = ["SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile"];
   const cmd = 'robocopy "' + srcDir + '" "' + workDir + '" /E /XD ' + xd.join(" ") + " /XF " + xf.join(" ") + " /NFL /NDL /NJH /NJS /R:1 /W:1";
-  try { execSync(cmd, { stdio: "ignore" }); }
-  catch (e) { const code = e && e.status; if (code >= 8) throw new Error("複製 Chrome profile 失敗 (robocopy code=" + code + ")"); }
+  // robocopy 傳回碼為位元旗標：1=有複製 2=有多餘 8=部分失敗（Chrome 執行中檔案被鎖）16=嚴重錯誤。
+  // Chrome 開著時 8/9/11 屬預期（被鎖的檔案略過，cookies 為 best-effort），只要複製後的 profile 可用就放行。
+  let code = 0;
+  try { execSync(cmd, { stdio: "ignore" }); }
+  catch (e) { code = e && e.status ? e.status : 16; }
+  if (code >= 16) throw new Error("複製 Chrome profile 失敗 (robocopy code=" + code + ")");
+  if (code >= 8) console.log("[profile] 部分檔案複製失敗（robocopy code=" + code + "，Chrome 執行中檔案被鎖），以已複製的部分繼續");
+  if (!fs.existsSync(path.join(workDir, "Default", "Preferences"))) {
+    throw new Error("複製後的 Chrome profile 缺少 Default\\Preferences（robocopy code=" + code + "），請先關閉 Chrome 再試");
+  }
 }
 
 async function launchPersistent({ userDataDir, profileDirectory, headless }) {
@@ -190,7 +200,7 @@ async function main() {
   const context = await launchPersistent({ userDataDir: workProfile, profileDirectory, headless });
   const page = context.pages()[0] || await context.newPage();
 
-  const capImgSel = "#c_b2c_booking_ubk_search_cph_body_logincaptcha_CaptchaImage";
+  const capImgSel = CAPTCHA_IMG_SEL;
   const maxTries = parseInt(args.captchaTries || "6", 10);
   let entered = false;
   for (let attempt = 1; attempt <= maxTries && !entered; attempt++) {
@@ -437,7 +447,16 @@ function saveFlights(flights, meta) {
   }
   return results;
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+// 僅直接執行本檔時跑主流程(讓 uniair-fares.js 可 import 沿用流程)
+const selfPath = path.resolve(fileURLToPath(import.meta.url));
+const entryPath = process.argv[1] ? path.resolve(process.argv[1]) : "";
+if (entryPath === selfPath) main().catch((e) => { console.error(e); process.exit(1); });
+
+export {
+  chromium, solveCaptcha, captureCaptchaUpscaled, fillForm, prepareProfile, launchPersistent,
+  parseArgs, parseDate, resolveCity, CITY, buildDateRange, readDateBar, clickDate, goToDate,
+  scrapeFlights, saveFlights, nowStamp, URL,
+};
 
 
 

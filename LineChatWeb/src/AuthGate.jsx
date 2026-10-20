@@ -15,7 +15,6 @@ const FLT_ROUTE_ORDER = [
   ['KHH', 'MZG'],
   ['TNN', 'MZG'],
   ['CYI', 'MZG'],
-  ['KNH', 'MZG'],
 ]
 
 // 授權閘門: 頂端 status bar(僅品牌) + 左側 docker bar(上=首頁/生圖, 下=帳號登入/登出)。

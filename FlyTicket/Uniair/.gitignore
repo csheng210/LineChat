@@ -9,3 +9,8 @@ flightlist.json
 itinerary.html
 captcha-live.png
 .chrome-profile/
+fare-modal.html
+fare-page.html
+fare-modal.png
+fares.json
+*.log

@@ -55,3 +55,39 @@ Chrome 基於安全限制，**不允許在「預設」user-data-dir 上啟用 De
 
 > 複製目錄是獨立鎖，**不需先關閉 Chrome** 即可抓取（cookies 為 best-effort，Chrome 執行中
 > 被鎖的檔案會略過複製）。FlyTicketAPI 對華信任務強制串行（concurrency=1）。
+
+## 票種價格採集（mandarin-route-fares.js）
+「我要購票」觸發票種彈窗 `#ticket-modal`，彈窗資料藏在隱藏欄位 `#FareViewModelJsonStr`，
+內容是 **gzip + base64**，Node 端以 `zlib.gunzipSync` 解開後讀 `FareInfos`。
+本腳本做**航線級**採集：華信同一條航線的一般票種票價與日期無關，只要找到第一班可購票航班，
+把它的五種票價當成整條航線的票價群，寫進 `FlyTicket/澎湖航班.json` 該航線條目的 `票種價格`。
+
+```powershell
+node mandarin-route-fares.js --pax 4
+```
+選項：
+- `--date`：起算日（預設今天 +3 天）
+- `--try-days`：查不到可購票航班時往後連找幾天（預設 7）
+- `--only 高雄`：只跑「航線名稱含此字串」的航線，逐條補漏用
+- `--pax`：人數（預設 4）
+- `--headless`：可加，但華信常擋 headless，**建議用預設有視窗模式**
+
+### 票種對應（華信票種名稱不獨立）
+華信彈窗把敬老票、愛心票等都顯示成「全額票」，名稱不可靠，因此改用 `farebasis` 後綴辨識：
+
+| 票種 | 條件 |
+|---|---|
+| 全額 | `farebasis === "Y"` |
+| 敬老 | `farebasis` 以 `/CD50` 結尾 |
+| 兒童 | `farebasis` 以 `/CH` + 數字結尾 |
+| 愛心 | `farebasis` 以 `/SB50` 結尾 |
+| 愛心陪同 | `farebasis` 以 `/AT50` 結尾 |
+
+只取一般票種 `type === "Y"`（居民票種不取）。航班編號組成 `"AE" + flightData.flightNumber`。
+
+寫入格式與立榮相同（`全額/敬老/兒童/愛心/愛心陪同` + `範例航班/範例日期/更新時間`），
+查不到票寫 `"說明": "尚無取得票價"`。每條航線寫檔前重讀整份檔案、只改自己那條航線，
+與立榮腳本同時使用不會互蓋。
+
+彈窗關閉用 `jQuery("#ticket-modal").modal("hide")` 並移除殘留的 `.modal-backdrop`，
+避免遮罩擋住下一班的「我要購票」。開頁與搜尋結果被 CloudFront 擋時會重試（每日最多 4 次）。
