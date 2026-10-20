@@ -183,7 +183,7 @@ export default function FlightBoard({ route }) {
                   <thead>
                     <tr>
                       <th className="flt-day-head">日期</th>
-                      {TIME_BUCKETS.map((b) => (<th key={b.label} className="flt-time-head">{b.label}</th>))}
+                      {TIME_BUCKETS.map((b) => (<th key={b.label} className="flt-time-head">{b.start}-</th>))}
                     </tr>
                   </thead>
                   <tbody>
@@ -200,7 +200,7 @@ export default function FlightBoard({ route }) {
                               onClick={() => setSelDay(dateStr)}
                               role="button"
                               title="查看當日全部航班"
-                            >{ym.m}/{day}（{WEEKDAY[dow]}）</th>
+                            ><span className="flt-day-date">{ym.m}/{day}</span><span className="flt-day-wd">（{WEEKDAY[dow]}）</span></th>
                             {TIME_BUCKETS.map((b, bi) => {
                               const list = cell[dateStr + '|' + bi]
                               let cls = 'flt-cell-empty', mark = ''

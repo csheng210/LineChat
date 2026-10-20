@@ -1110,7 +1110,13 @@
 .flt-day-active { background: #e0f0e8; box-shadow: inset 3px 0 0 #0a8a3d; }
 
 .flt-day-head,
-.flt-day { width: 84px; } /* 桌面: 容得下「10/9（五）」 */
+.flt-day { width: 84px; } /* 桌面: 日期與星期分兩行 */
+
+.flt-day-date,
+.flt-day-wd { display: block; line-height: 1.3; }
+.flt-day-date { font-size: 13px; }
+.flt-day-wd { font-size: 12px; }
+.flt-time-head { font-size: 14px; }
 
 .flt-cell {
   height: 30px;
@@ -1154,8 +1160,10 @@
   .flt-table th,
   .flt-table td { padding: 2px 1px; }
   .flt-day-head,
-  .flt-day { width: 48px; font-size: 8px; white-space: normal; word-break: break-all; }
-  .flt-time-head { font-size: 9px; letter-spacing: 0; }
+  .flt-day { width: 48px; font-size: 10px; white-space: normal; }
+  .flt-day-date { font-size: 10px; }
+  .flt-day-wd { font-size: 10px; }
+  .flt-time-head { font-size: 11px; letter-spacing: 0; }
   .flt-cell { height: 24px; }
   .flt-cell-ok .flt-dot,
   .flt-cell-ok .flt-dot-blue,
