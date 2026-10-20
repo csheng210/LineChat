@@ -111,25 +111,33 @@ async function pollJob(jobId) {
 
 // 背景執行(來程+回程兩個 job): 與元件生命週期脫鉤, 切頁卸載後仍持續輪詢並寫入 store
 async function runJobs(p) {
-  let ids = []
+  const jobs = []
   try {
-    ids = [await startJob(qUrl(p.depOut, p.arrOut, p.outDate, p.pax)),
-      await startJob(qUrl(p.depRet, p.arrRet, p.retDate, p.pax))]
-    store.jobs = [{ jobId: ids[0], tone: 'out' }, { jobId: ids[1], tone: 'ret' }]
+    if (p.outChk) jobs.push({ jobId: await startJob(qUrl(p.depOut, p.arrOut, p.outDate, p.pax)), tone: 'out' })
+    if (p.retChk) jobs.push({ jobId: await startJob(qUrl(p.depRet, p.arrRet, p.retDate, p.pax)), tone: 'ret' })
+    store.jobs = jobs
     emit()
   } catch (e) {
-    store.res = { out: null, outErr: e.message, ret: null, retErr: e.message, labelOut: p.labelOut, labelRet: p.labelRet }
+    store.res = {
+      hasOut: p.outChk, hasRet: p.retChk,
+      out: null, outErr: p.outChk ? e.message : '', ret: null, retErr: p.retChk ? e.message : '',
+      labelOut: p.labelOut, labelRet: p.labelRet,
+    }
     store.running = false; store.jobs = []; emit(); return
   }
-  const [o, rt] = await Promise.allSettled(ids.map((id) => pollJob(id)))
+  const settled = await Promise.allSettled(jobs.map((j) => pollJob(j.jobId)))
   if (store.cancelled) {
     store.running = false; store.cancelling = false; store.jobs = []; store.prog = {}; emit(); return
   }
+  const pick = (tone) => settled[jobs.findIndex((j) => j.tone === tone)]
+  const o = p.outChk ? pick('out') : null
+  const rt = p.retChk ? pick('ret') : null
   store.res = {
-    out: o.status === 'fulfilled' ? o.value : null,
-    outErr: o.status === 'fulfilled' ? '' : (o.reason?.message || '來程查詢失敗'),
-    ret: rt.status === 'fulfilled' ? rt.value : null,
-    retErr: rt.status === 'fulfilled' ? '' : (rt.reason?.message || '回程查詢失敗'),
+    hasOut: p.outChk, hasRet: p.retChk,
+    out: o && o.status === 'fulfilled' ? o.value : null,
+    outErr: o ? (o.status === 'fulfilled' ? '' : (o.reason?.message || '來程查詢失敗')) : '',
+    ret: rt && rt.status === 'fulfilled' ? rt.value : null,
+    retErr: rt ? (rt.status === 'fulfilled' ? '' : (rt.reason?.message || '回程查詢失敗')) : '',
     labelOut: p.labelOut, labelRet: p.labelRet,
   }
   store.running = false; store.cancelling = false; store.jobs = []; emit()
@@ -152,6 +160,8 @@ export default function LiveQuery({ routes, defaultRoute }) {
     return rev ? keyOf(rev) : ''
   })
   const [pax, setPax] = useState(saved?.pax ?? 4)
+  const [outChk, setOutChk] = useState(saved?.outChk ?? true) // 勾選=查詢該航線
+  const [retChk, setRetChk] = useState(saved?.retChk ?? true)
   const [snap, setSnap] = useState(snapshot)
   const restoredRef = useRef(!!saved) // 重返時跳過一次自動反選, 保留原回程航線
 
@@ -192,13 +202,14 @@ export default function LiveQuery({ routes, defaultRoute }) {
 
   function run() {
     if (store.running) return
-    if (!outRoute || !retRoute) { store.msg = '請選擇出發與回程航線'; emit(); return }
-    if (!outDate || !retDate) { store.msg = '請選擇出發與回程日期'; emit(); return }
+    if (!outChk && !retChk) { store.msg = '請至少勾選一個要查詢的航線'; emit(); return }
+    if (outChk && (!outRoute || !outDate)) { store.msg = '請選擇出發航線與出發日期'; emit(); return }
+    if (retChk && (!retRoute || !retDate)) { store.msg = '請選擇回程航線與回程日期'; emit(); return }
     const p = {
-      depOut: outRoute.dep, arrOut: outRoute.arr, depRet: retRoute.dep, arrRet: retRoute.arr,
-      outDate, retDate, pax, outKey, retKey,
-      labelOut: outRoute['出發'] + ' 往 ' + outRoute['目的地'] + ' ' + outDate,
-      labelRet: retRoute['出發'] + ' 往 ' + retRoute['目的地'] + ' ' + retDate,
+      depOut: outRoute?.dep, arrOut: outRoute?.arr, depRet: retRoute?.dep, arrRet: retRoute?.arr,
+      outDate, retDate, pax, outKey, retKey, outChk, retChk,
+      labelOut: outRoute ? outRoute['出發'] + ' 往 ' + outRoute['目的地'] + ' ' + outDate : '',
+      labelRet: retRoute ? retRoute['出發'] + ' 往 ' + retRoute['目的地'] + ' ' + retDate : '',
     }
     store.running = true; store.cancelled = false; store.cancelling = false
     store.res = null; store.msg = ''; store.prog = {}; store.jobs = []; store.params = p
@@ -223,23 +234,35 @@ export default function LiveQuery({ routes, defaultRoute }) {
           <span className="gen-main-sub">即時抓取航空公司網頁航班（來程+回程）</span>
         </header>
         <div className="lq-form">
-          <label>出發航線
-            <select value={outKey} onChange={(e) => setOutKey(e.target.value)} disabled={busy}>
-              {outOpts.length === 0 && <option value="">無可用航線</option>}
-              {outOpts.map((r) => <option key={keyOf(r)} value={keyOf(r)}>{r['出發']} 往 {r['目的地']}</option>)}
-            </select>
-          </label>
+          <div className="lq-field">
+            <label>出發航線
+              <select value={outKey} onChange={(e) => setOutKey(e.target.value)} disabled={busy || !outChk}>
+                {outOpts.length === 0 && <option value="">無可用航線</option>}
+                {outOpts.map((r) => <option key={keyOf(r)} value={keyOf(r)}>{r['出發']} 往 {r['目的地']}</option>)}
+              </select>
+            </label>
+            <label className="lq-chk" title="勾選則查詢來程航班">
+              <input type="checkbox" checked={outChk} onChange={(e) => setOutChk(e.target.checked)} disabled={busy} />
+              查詢
+            </label>
+          </div>
           <label>出發日期
-            <input type="date" value={outDate} onChange={(e) => { setOutDate(e.target.value); if (e.target.value) setRetDate(addDaysStr(e.target.value, 2)) }} disabled={busy} />
+            <input type="date" value={outDate} onChange={(e) => { setOutDate(e.target.value); if (e.target.value) setRetDate(addDaysStr(e.target.value, 2)) }} disabled={busy || !outChk} />
           </label>
-          <label>回程航線
-            <select value={retKey} onChange={(e) => setRetKey(e.target.value)} disabled={busy}>
-              {retOpts.length === 0 && <option value="">無可用航線</option>}
-              {retOpts.map((r) => <option key={keyOf(r)} value={keyOf(r)}>{r['出發']} 往 {r['目的地']}</option>)}
-            </select>
-          </label>
+          <div className="lq-field">
+            <label>回程航線
+              <select value={retKey} onChange={(e) => setRetKey(e.target.value)} disabled={busy || !retChk}>
+                {retOpts.length === 0 && <option value="">無可用航線</option>}
+                {retOpts.map((r) => <option key={keyOf(r)} value={keyOf(r)}>{r['出發']} 往 {r['目的地']}</option>)}
+              </select>
+            </label>
+            <label className="lq-chk" title="勾選則查詢回程航班">
+              <input type="checkbox" checked={retChk} onChange={(e) => setRetChk(e.target.checked)} disabled={busy} />
+              查詢
+            </label>
+          </div>
           <label>回程日期
-            <input type="date" value={retDate} onChange={(e) => setRetDate(e.target.value)} disabled={busy} />
+            <input type="date" value={retDate} onChange={(e) => setRetDate(e.target.value)} disabled={busy || !retChk} />
           </label>
           <label>人數
             <input type="number" min="1" max="9" value={pax} onChange={(e) => setPax(e.target.value)} disabled={busy} />
@@ -263,8 +286,8 @@ export default function LiveQuery({ routes, defaultRoute }) {
               <button className="flt-detail-close" onClick={closeRes} aria-label="關閉">✕</button>
             </div>
             <div className="lq-results">
-              <Leg title={'來程 ' + res.labelOut} tone="lq-tone-out" res={res.out} err={res.outErr} />
-              <Leg title={'回程 ' + res.labelRet} tone="lq-tone-ret" res={res.ret} err={res.retErr} />
+              {res.hasOut && <Leg title={'來程 ' + res.labelOut} tone="lq-tone-out" res={res.out} err={res.outErr} />}
+              {res.hasRet && <Leg title={'回程 ' + res.labelRet} tone="lq-tone-ret" res={res.ret} err={res.retErr} />}
             </div>
           </div>
         </>

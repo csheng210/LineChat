@@ -1282,6 +1282,11 @@
   background: #fff;
   min-width: 0;
 }
+.lq-field { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lq-field > label:first-child { flex: 1; min-width: 0; }
+.lq-chk { flex-direction: row; align-items: center; gap: 5px; white-space: nowrap; }
+.lq-chk input { width: 20px; height: 20px; padding: 0; border: 1px solid #d8d8d8; border-radius: 4px; background: #fff; accent-color: #0a8a3d; cursor: pointer; }
+.lq-chk { font-size: 13px; }
 .lq-run {
   grid-column: 1 / -1;
   border: none;
