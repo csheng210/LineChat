@@ -146,7 +146,7 @@ function jobSummary(job) {
     航線數: job.total, 成功數: okCount, 失敗數: job.結果.length - okCount,
     總筆數: job.結果.reduce((s, r) => s + r.筆數, 0),
     耗時秒: Math.round(((job.finishedAt || Date.now()) - job.createdAt) / 1000),
-    日期範圍: job.日期範圍, 人數: job.人數, 訊息: job.訊息, 結果: job.結果,
+    日期範圍: job.日期範圍, 人數: job.人數, 訊息: job.訊息, 結果: job.結果, 航線: job.航線 || "",
   };
 }
 // 每 30 分鐘清理已結束的舊工作, 避免記憶體無限成長
@@ -403,5 +403,66 @@ app.get("/flights-online", async (req, res) => {
     抓取,
   });
 });
+
+// GET/POST /flights-online/start?dep=&arr=&start=&end=&airline=all&pax=4 -> { ok, jobId, 天總數 }
+// 即時查詢非同步版: 立即回 jobId, 背景抓取(寫回 tickets/), 前端輪詢 /flights-online/status
+function startOnline(req, res) {
+  const dep = resolveCityName(req.query.dep);
+  const arr = resolveCityName(req.query.arr);
+  const depCode = resolveCityCode(req.query.dep);
+  const arrCode = resolveCityCode(req.query.arr);
+  const start = parseDate(req.query.start);
+  const end = parseDate(req.query.end) || start;
+  const pax = Math.max(1, parseInt(req.query.pax || "4", 10));
+  const timeoutMs = Math.max(60000, parseInt(req.query.timeoutMs || "600000", 10));
+  if (!dep || !arr || !depCode || !arrCode) return res.status(400).json({ ok: false, 訊息: "需要 dep 與 arr（例 dep=松山&arr=澎湖，可用中文名或 IATA 碼）" });
+  if (!start) return res.status(400).json({ ok: false, 訊息: "需要 start 日期（例 2026-10-25）" });
+  if (end.ymd < start.ymd) return res.status(400).json({ ok: false, 訊息: "end 不可早於 start" });
+  const airline = (req.query.airline || "all").toLowerCase();
+  const 有航線 = airlinesFor(depCode, arrCode);
+  let keys = airline === "all" ? 有航線 : [airline].filter((k) => 有航線.includes(k));
+  if (!keys.every((k) => AIRLINES[k])) return res.status(400).json({ ok: false, 訊息: "airline 參數不合法（uniair/mandarin/all）" });
+  if (!keys.length) return res.json({ ok: false, 訊息: "該航線無業者營運（澎湖航班.json 無此航線）" });
+  const job = newJob({ 日期範圍: { start: start.ymd, end: end.ymd }, 人數: pax });
+  job.航線 = dep + "\u2192" + arr;
+  job.total = keys.length;
+  job.totalDays = keys.length * daysInRange(start.ymd, end.ymd);
+  res.json({ ok: true, jobId: job.id, 航線: job.航線, 航空公司數: keys.length, 天總數: job.totalDays });
+  const tasks = keys.map((k) => ({ airline: k, route: { dep: depCode, arr: arrCode }, start, end, pax }));
+  // 背景執行, 不 await -> 前端輪詢 /flights-online/status; 完成後讀回剛寫入的航班
+  runQueue(tasks, 2, timeoutMs, job).then(() => {
+    job.status = job.cancelled ? "cancelled" : "done";
+    job.finishedAt = Date.now();
+    try {
+      const { 檔案, all } = readTickets(dep, arr, start, end, keys);
+      const okCount = job.結果.filter((r) => r.ok).length;
+      job.ok全部 = okCount === job.結果.length;
+      job.航班 = all;
+      job.檔案 = 檔案;
+    } catch (e) { job.訊息 = (job.訊息 ? job.訊息 + " | " : "") + "讀回失敗: " + e.message; }
+  }).catch((e) => {
+    job.status = "error"; job.finishedAt = Date.now(); job.訊息 = e.message;
+  });
+}
+app.get("/flights-online/start", startOnline);
+app.post("/flights-online/start", startOnline);
+
+// GET /flights-online/status?jobId= -> 即時查詢進度/結果(完成時含 航班)
+app.get("/flights-online/status", (req, res) => {
+  const job = jobs.get(req.query.jobId);
+  if (!job) return res.status(404).json({ ok: false, 訊息: "找不到工作 (jobId)" });
+  const done = job.status !== "running";
+  res.json({
+    ok: true, ...jobSummary(job),
+    即時: true,
+    完成: done,
+    航班: done ? (job.航班 || []) : [],
+    檔案: done ? (job.檔案 || []) : [],
+  });
+});
+
+// GET/POST /flights-online/cancel?jobId= -> 停止即時查詢(殺進行中的抓取程序)
+app.get("/flights-online/cancel", cancelSync);
+app.post("/flights-online/cancel", cancelSync);
 
 app.listen(PORT, HOST, () => console.log("FlyTicketAPI listening on http://" + HOST + ":" + PORT));

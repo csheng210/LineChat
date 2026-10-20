@@ -5,6 +5,7 @@ import { FUNCTIONS } from './imagegenFunctions.jsx'
 import { getSnapshot, hasRunningJob, subscribe } from './genStore.js'
 import { getSnapshot as getFltSnapshot, hasRunning as hasFlightSync, subscribe as fltSubscribe } from './flightSyncStore.js'
 import FlightBoard from './FlightBoard.jsx'
+import LiveQuery from './LiveQuery.jsx'
 import './AuthGate.css'
 
 // 航班航線固定順序: 每列 [城市往澎湖, 澎湖往城市]
@@ -24,7 +25,7 @@ export default function AuthGate({ children }) {
   const [state, setState] = useState('loading') // loading | unauth | auth
   const [user, setUser] = useState(null)
   const [open, setOpen] = useState(false)
-  const [view, setView] = useState('chat') // chat | imagegen
+  const [view, setView] = useState('livequery') // chat | imagegen | flights | livequery(預設)
   const [active, setActive] = useState('image1') // 生圖功能, 預設單圖編輯
   const [routes, setRoutes] = useState([]) // 航班航線清單
   const [route, setRoute] = useState(null) // 選中航線 { dep, arr, 出發, 目的地 }
@@ -68,7 +69,7 @@ export default function AuthGate({ children }) {
 
   // 航班: 進入 flights 視圖時向 FlyTicketAPI 抓取航線清單(依 dep+arr 去重)
   useEffect(() => {
-    if (view !== 'flights' || routes.length) return
+    if ((view !== 'flights' && view !== 'livequery') || routes.length) return
     fetch('/flights-api/routes')
       .then((r) => r.json().catch(() => ({})))
       .then((d) => {
@@ -129,10 +130,10 @@ export default function AuthGate({ children }) {
             </button>
 
             <button
-              className={'auth-dock-btn' + (view === 'flights' ? ' on' : '') + (fltBusy ? ' busy' : '')}
-              onClick={() => setView('flights')}
-              title={fltBusy ? '航班(同步進行中)' : '航班'}
-              aria-label="航班"
+              className={'auth-dock-btn' + (view === 'flights' || view === 'livequery' ? ' on' : '') + (fltBusy ? ' busy' : '')}
+              onClick={() => setView('livequery')}
+              title={fltBusy ? '航班(同步進行中)' : '即時查詢'}
+              aria-label="即時查詢"
             >
               <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" stroke="none" aria-hidden="true">
                 <path d="M21 15.5v-1.7l-7.5-4.7V4.2a1.5 1.5 0 0 0-3 0v4.9L3 13.8v1.7l7.5-2.3v4.3l-2.1 1.5v1.4L12 20.6l3.6.8v-1.4l-2.1-1.5v-4.3L21 15.5Z" />
@@ -190,7 +191,7 @@ export default function AuthGate({ children }) {
             </button>
             <span className="gen-title">模型生圖(影片)</span>
           </div>
-        ) : authed && view === 'flights' ? (
+        ) : authed && (view === 'flights' || view === 'livequery') ? (
           <div className="gen-statusbar">
             <button
               className={'gen-menubtn' + (menuOpen ? ' open' : '')}
@@ -253,11 +254,28 @@ export default function AuthGate({ children }) {
           </>
         )}
 
-        {authed && view === 'flights' && (
+        {authed && (view === 'flights' || view === 'livequery') && (
           <>
             {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
             <div className={'gen-drawer gen-drawer-wide' + (menuOpen ? ' open' : '')} role="menu">
               <div className="gen-drawer-title">航班航線</div>
+              <button
+                role="menuitem"
+                className={'gen-item lq-open' + (view === 'livequery' ? ' active' : '')}
+                onClick={() => { setView('livequery'); if (isMobile()) setMenuOpen(false) }}
+              >
+                <span className="gen-item-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <circle cx="11" cy="11" r="7" />
+                    <line x1="21" y1="21" x2="16.5" y2="16.5" />
+                  </svg>
+                </span>
+                <span className="gen-item-text">
+                  <span className="gen-item-label">即時查詢</span>
+                  <span className="gen-item-desc">輸入航線/日期/人數, 即時抓取來程+回程</span>
+                </span>
+              </button>
+              <div className="gen-drawer-sep" />
               {FLT_ROUTE_ORDER.map(([a, b]) => {
                 const r1 = routes.find((r) => r.dep === a && r.arr === b)
                 const r2 = routes.find((r) => r.dep === b && r.arr === a)
@@ -269,7 +287,7 @@ export default function AuthGate({ children }) {
                           key={r.dep + '>' + r.arr}
                           role="menuitem"
                           className={'gen-item' + (route && route.dep === r.dep && route.arr === r.arr ? ' active' : '')}
-                          onClick={() => { setRoute(r); if (isMobile()) setMenuOpen(false) }}
+                          onClick={() => { setRoute(r); setView('flights'); if (isMobile()) setMenuOpen(false) }}
                         >
                           <span className="gen-item-icon">
                             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -309,7 +327,7 @@ export default function AuthGate({ children }) {
               </div>
             </div>
           )}
-          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : view === 'flights' ? <FlightBoard route={route} /> : children)}
+          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : view === 'flights' ? <FlightBoard route={route} /> : view === 'livequery' ? <LiveQuery routes={routes} defaultRoute={route} /> : children)}
         </div>
       </div>
       </div>

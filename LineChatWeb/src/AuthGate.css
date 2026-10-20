@@ -383,6 +383,11 @@
   color: #222;
 }
 
+.gen-main-sub {
+  font-size: 12px;
+  color: #888;
+}
+
 .flt-sync-wrap {
   margin-left: auto;
   display: flex;
@@ -398,7 +403,7 @@
 }
 
 .flt-sync-btn {
-  align-self: flex-end;
+  align-self: center;
   padding: 5px 14px;
   font-size: 13px;
   font-weight: 600;
@@ -969,7 +974,8 @@
 .flt-nav {
   display: flex;
   align-items: center;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 10px 14px;
   margin-bottom: 12px;
 }
 
@@ -1221,6 +1227,109 @@
   overflow: auto;
   padding: 12px 14px;
 }
+/* --- 即時查詢彈窗 --- */
+.lq-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 9600;
+}
+.lq-modal {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9650;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.25);
+  width: min(560px, calc(100vw - 20px));
+  max-height: 84vh;
+  overflow: auto;
+  padding: 12px 14px;
+}
+.lq-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.lq-head strong { font-size: 16px; color: #222; }
+.lq-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 10px;
+  margin-bottom: 10px;
+  max-width: 560px;
+}
+
+@media (max-width: 860px) {
+  .lq-form { grid-template-columns: 1fr; }
+}
+.lq-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: #666;
+}
+.lq-form select,
+.lq-form input {
+  border: 1px solid #d8d8d8;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: #fff;
+  min-width: 0;
+}
+.lq-run {
+  grid-column: 1 / -1;
+  border: none;
+  border-radius: 8px;
+  background: #06c755;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 9px 12px;
+  cursor: pointer;
+}
+.lq-run:disabled { background: #9bcdb0; cursor: default; }
+.lq-btns {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 8px;
+}
+.lq-btns .lq-run { flex: 1; }
+.lq-stop { flex: none !important; background: #e5484d !important; }
+.lq-stop:disabled { background: #eba7aa !important; }
+.lq-msg { font-size: 12px; color: #e5484d; margin-bottom: 8px; }
+.lq-results { border-top: 1px solid #eee; padding-top: 8px; }
+.lq-leg { margin-bottom: 12px; }
+.lq-leg-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.lq-leg-tag {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.lq-tone-out { background: #eafaf0; color: #0a8a3d; }
+.lq-tone-ret { background: #e8f1fd; color: #2f7ed8; }
+.lq-leg-meta { font-size: 11px; color: #888; }
+.lq-leg-err { font-size: 12px; color: #e5484d; }
+.lq-leg-empty { font-size: 12px; color: #999; }
+.lq-open .gen-item-label { color: #0a8a3d; }
+
+/* 航空公司上色: 立榮=綠, 華信=藍(與圈圈色系一致) */
+.flt-detail-airline.lq-air-uniair { color: #0a8a3d; }
+.flt-detail-airline.lq-air-mandarin { color: #2f7ed8; }
+
 .flt-detail-head {
   display: flex;
   align-items: center;
@@ -1228,6 +1337,9 @@
   margin-bottom: 8px;
 }
 .flt-detail-head strong { font-size: 15px; color: #222; }
+.flt-live-wrap { display: flex; align-items: center; gap: 8px; }
+.flt-live-prog { font-size: 12px; color: #666; white-space: nowrap; }
+.flt-live-msg { font-size: 12px; color: #0a8a3d; margin-bottom: 8px; }
 .flt-detail-close {
   border: none;
   background: #f0f0f0;

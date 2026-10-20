@@ -38,10 +38,10 @@ function setJob(key, patch) {
   emit()
 }
 
-function persistJobId(key, jobId) {
+function persistJobId(key, jobId, path) {
   try {
     const map = JSON.parse(sessionStorage.getItem(STORE_KEY) || '{}')
-    if (jobId) map[key] = jobId
+    if (jobId) map[key] = { jobId, path }
     else delete map[key]
     sessionStorage.setItem(STORE_KEY, JSON.stringify(map))
   } catch {
@@ -69,14 +69,16 @@ function finish(key, patch) {
 }
 
 // 輪詢 /sync/status 直到 done / cancelled / error(在模組層跑, 元件卸載也不中斷)。
-function pollStatus(key, jobId) {
+function pollStatus(key, jobId, path, label) {
   if (polling.has(jobId)) return
   polling.add(jobId)
+  const statusPath = path || '/sync/status'
+  const name = label || '同步'
   const tick = async () => {
     try {
-      const r = await fetch(FLIGHTS + '/sync/status?jobId=' + encodeURIComponent(jobId))
+      const r = await fetch(FLIGHTS + statusPath + '?jobId=' + encodeURIComponent(jobId))
       const d = await r.json().catch(() => ({}))
-      if (!r.ok || !d.ok) { finish(key, { msg: '同步失敗: ' + (d.訊息 || ('HTTP ' + r.status)) }); return }
+      if (!r.ok || !d.ok) { finish(key, { msg: name + '失敗: ' + (d.訊息 || ('HTTP ' + r.status)) }); return }
       if (d.status === 'running') {
         setJob(key, {
           done: d.進度 || 0, total: d.總數 || 0,
@@ -88,11 +90,11 @@ function pollStatus(key, jobId) {
       const sec = typeof d.耗時秒 === 'number' ? d.耗時秒 + ' 秒' : '? 秒'
       const done = d.進度 || 0, total = d.總數 || 0
       const dayDone = d.天進度 || 0, dayTotal = d.天總數 || 0
-      if (d.status === 'done') finish(key, { done, total, dayDone, dayTotal, msg: '同步完成 · 本次耗時 ' + sec })
+      if (d.status === 'done') finish(key, { done, total, dayDone, dayTotal, msg: name + '完成 · 本次耗時 ' + sec })
       else if (d.status === 'cancelled') finish(key, { done, total, dayDone, dayTotal, msg: '已停止 · 本次耗時 ' + sec })
-      else finish(key, { done, total, dayDone, dayTotal, msg: '同步失敗: ' + (d.訊息 || '發生錯誤') })
+      else finish(key, { done, total, dayDone, dayTotal, msg: name + '失敗: ' + (d.訊息 || '發生錯誤') })
     } catch (e) {
-      finish(key, { msg: '同步失敗: ' + e.message })
+      finish(key, { msg: name + '失敗: ' + e.message })
     }
   }
   tick()
@@ -116,10 +118,31 @@ export async function startSync(key, { dep, arr, y }) {
     const d = await r.json().catch(() => ({}))
     if (!r.ok || !d.ok) { setJob(key, { busy: false, msg: '同步失敗: ' + (d.訊息 || d.error || ('HTTP ' + r.status)) }); return }
     setJob(key, { jobId: d.jobId, done: 0, total: d.航線數 || 0, dayDone: 0, dayTotal: d.天總數 || 0 })
-    persistJobId(key, d.jobId)
-    pollStatus(key, d.jobId)
+    persistJobId(key, d.jobId, '/sync/status')
+    pollStatus(key, d.jobId, '/sync/status', '同步')
   } catch (e) {
     setJob(key, { busy: false, msg: '同步失敗: ' + e.message })
+  }
+}
+
+// 當日即時抓取(航班資訊頁「即時查詢」): 走 /flights-online 非同步 job,
+//   key 用 dep|arr|日期(與整月同步的 dep|arr 分開), 完成後 bump reload 讓表格與明細重抓更新。
+export async function startLiveDay(key, { dep, arr, date, pax = 4 }) {
+  const job = jobs[key]
+  if (!dep || !arr || !date || (job && job.busy)) return
+  setJob(key, { ...EMPTY_JOB, busy: true })
+  const url = FLIGHTS + '/flights-online/start?dep=' + encodeURIComponent(dep)
+    + '&arr=' + encodeURIComponent(arr) + '&start=' + date + '&end=' + date
+    + '&airline=all&pax=' + Math.max(1, Math.min(9, Number(pax) || 4))
+  try {
+    const r = await fetch(url)
+    const d = await r.json().catch(() => ({}))
+    if (!r.ok || !d.ok) { setJob(key, { busy: false, msg: '即時查詢失敗: ' + (d['訊息'] || ('HTTP ' + r.status)) }); return }
+    setJob(key, { jobId: d.jobId, done: 0, total: 1, dayDone: 0, dayTotal: d['天總數'] || 1 })
+    persistJobId(key, d.jobId, '/flights-online/status')
+    pollStatus(key, d.jobId, '/flights-online/status', '即時查詢')
+  } catch (e) {
+    setJob(key, { busy: false, msg: '即時查詢失敗: ' + e.message })
   }
 }
 
@@ -131,14 +154,19 @@ export async function stopSync(key) {
   try { await fetch(FLIGHTS + '/sync/cancel?jobId=' + encodeURIComponent(job.jobId)) } catch (e) {}
 }
 
+// 當日即時查詢的停止: 與整月同步共用 cancel 端點(job 都在後端同一張表)。
+export const stopLiveDay = stopSync
+
 export function hasRunning(snap) {
   const src = snap ? snap.jobs : jobs
   return Object.values(src).some((j) => j && j.busy)
 }
 
 // 重新整理後接回: 對 sessionStorage 裡還留下的 job_id 繼續輪詢。
-for (const [key, jobId] of Object.entries(loadPersisted())) {
+for (const [key, val] of Object.entries(loadPersisted())) {
+  const jobId = typeof val === 'string' ? val : val && val.jobId
   if (!jobId) continue
+  const path = typeof val === 'string' ? '/sync/status' : (val.path || '/sync/status')
   setJob(key, { ...EMPTY_JOB, busy: true, jobId })
-  pollStatus(key, jobId)
+  pollStatus(key, jobId, path, path === '/flights-online/status' ? '即時查詢' : '同步')
 }
