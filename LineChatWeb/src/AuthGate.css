@@ -1469,3 +1469,14 @@
   .flt-price-table th,
   .flt-price-table td { padding: 5px 5px; }
 }
+
+/* 反推提示詞: 選影片的內嵌播放器預覽 */
+.gen-thumb-video {
+  width: 240px;
+  height: 160px;
+  object-fit: contain;
+  background: #000;
+}
+@media (max-width: 860px) {
+  .gen-thumb-video { width: 200px; height: 130px; }
+}

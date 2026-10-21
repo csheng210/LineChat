@@ -1,4 +1,4 @@
-import { useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import {
   DEFAULT_FORM,
@@ -97,6 +97,16 @@ export default function ImageGen({ active }) {
   const isTextVideo = active === 'text2video'
   const isFl2v = active === 'images2video'
   const [copied, setCopied] = useState(false)
+  const [videoUrl, setVideoUrl] = useState('') // 反推提示詞選影片: 內嵌播放器用的來源 URL
+
+  // 選到影片時產生可播放來源(object URL), 換檔/卸載時釋放, 讓預覽用播放器而非縮圖
+  useEffect(() => {
+    const isVid = image1 && image1.type && image1.type.startsWith('video/')
+    if (!isReverse || !isVid) { setVideoUrl(''); return }
+    const url = URL.createObjectURL(image1)
+    setVideoUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [image1, isReverse])
 
   async function onPickImage(slot, file) {
     if (!file) {
@@ -240,7 +250,19 @@ export default function ImageGen({ active }) {
                   onChange={(e) => onPickImage(1, e.target.files[0])}
                 />
                 {preview1 ? (
-                  <img className="gen-thumb" src={preview1} alt="輸入預覽" />
+                  isReverse && videoUrl ? (
+                    <video
+                      className="gen-thumb gen-thumb-video"
+                      src={videoUrl}
+                      controls
+                      playsInline
+                      preload="metadata"
+                      onClick={(e) => e.preventDefault()}
+                      onMouseDown={(e) => e.preventDefault()}
+                    />
+                  ) : (
+                    <img className="gen-thumb" src={preview1} alt="輸入預覽" />
+                  )
                 ) : (
                   <div className="gen-thumb gen-thumb-empty">{isReverse ? '＋ 選擇圖片/影片' : '＋ 選擇圖片'}</div>
                 )}
