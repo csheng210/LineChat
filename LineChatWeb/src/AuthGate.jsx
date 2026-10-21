@@ -5,6 +5,7 @@ import { FUNCTIONS } from './imagegenFunctions.jsx'
 import { getSnapshot, hasRunningJob, subscribe } from './genStore.js'
 import { getSnapshot as getFltSnapshot, hasRunning as hasFlightSync, subscribe as fltSubscribe } from './flightSyncStore.js'
 import FlightBoard from './FlightBoard.jsx'
+import FlightPrices from './FlightPrices.jsx'
 import LiveQuery from './LiveQuery.jsx'
 import './AuthGate.css'
 
@@ -129,7 +130,7 @@ export default function AuthGate({ children }) {
             </button>
 
             <button
-              className={'auth-dock-btn' + (view === 'flights' || view === 'livequery' ? ' on' : '') + (fltBusy ? ' busy' : '')}
+              className={'auth-dock-btn' + (view === 'flights' || view === 'livequery' || view === 'prices' ? ' on' : '') + (fltBusy ? ' busy' : '')}
               onClick={() => setView('livequery')}
               title={fltBusy ? '航班(同步進行中)' : '即時查詢'}
               aria-label="即時查詢"
@@ -190,7 +191,7 @@ export default function AuthGate({ children }) {
             </button>
             <span className="gen-title">模型生圖(影片)</span>
           </div>
-        ) : authed && (view === 'flights' || view === 'livequery') ? (
+        ) : authed && (view === 'flights' || view === 'livequery' || view === 'prices') ? (
           <div className="gen-statusbar">
             <button
               className={'gen-menubtn' + (menuOpen ? ' open' : '')}
@@ -253,7 +254,7 @@ export default function AuthGate({ children }) {
           </>
         )}
 
-        {authed && (view === 'flights' || view === 'livequery') && (
+        {authed && (view === 'flights' || view === 'livequery' || view === 'prices') && (
           <>
             {menuOpen && <div className="gen-drawer-backdrop" onClick={() => setMenuOpen(false)} />}
             <div className={'gen-drawer gen-drawer-wide' + (menuOpen ? ' open' : '')} role="menu">
@@ -272,6 +273,23 @@ export default function AuthGate({ children }) {
                 <span className="gen-item-text">
                   <span className="gen-item-label">即時查詢</span>
                   <span className="gen-item-desc">輸入航線/日期/人數, 即時抓取來程+回程</span>
+                </span>
+              </button>
+              <button
+                role="menuitem"
+                className={'gen-item lq-open' + (view === 'prices' ? ' active' : '')}
+                onClick={() => { setView('prices'); if (isMobile()) setMenuOpen(false) }}
+              >
+                <span className="gen-item-icon">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="2" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                    <line x1="9" y1="10" x2="9" y2="20" />
+                  </svg>
+                </span>
+                <span className="gen-item-text">
+                  <span className="gen-item-label">澎湖航班票價</span>
+                  <span className="gen-item-desc">各航線全額/敬老/兒童/愛心票價與往返</span>
                 </span>
               </button>
               <div className="gen-drawer-sep" />
@@ -326,7 +344,7 @@ export default function AuthGate({ children }) {
               </div>
             </div>
           )}
-          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : view === 'flights' ? <FlightBoard route={route} /> : view === 'livequery' ? <LiveQuery routes={routes} defaultRoute={route} /> : children)}
+          {state === 'auth' && (view === 'imagegen' ? <ImageGen active={active} /> : view === 'flights' ? <FlightBoard route={route} /> : view === 'livequery' ? <LiveQuery routes={routes} defaultRoute={route} /> : view === 'prices' ? <FlightPrices /> : children)}
         </div>
       </div>
       </div>

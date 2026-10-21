@@ -288,6 +288,16 @@ app.use(express.json());
 
 app.get("/health", (req, res) => res.json({ ok: true, service: "FlyTicketAPI", time: new Date().toISOString() }));
 
+// GET /penghu -> 直接回傳 澎湖航班.json 的原始內容（不做任何解析/轉換）
+app.get("/penghu", (req, res) => {
+  try {
+    const raw = fs.readFileSync(ROUTES_FILE, "utf8");
+    res.type("application/json").send(raw);
+  } catch (e) {
+    res.status(500).json({ ok: false, 訊息: e.message });
+  }
+});
+
 app.get("/routes", (req, res) => {
   try { res.json({ ok: true, 航線: loadRoutes() }); }
   catch (e) { res.status(500).json({ ok: false, 訊息: e.message }); }

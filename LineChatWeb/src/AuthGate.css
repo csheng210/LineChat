@@ -1434,3 +1434,38 @@
 .flt-cross-num { font-size: 9px; font-weight: 700; color: #e5484d; line-height: 1; }
 
 .flt-detail-updated { font-size: 11px; color: #999; }
+
+/* 澎湖航班票價表 */
+.flt-price-table {
+  border-collapse: collapse;
+  font-size: 13px;
+  width: 100%;
+  min-width: 560px;
+}
+.flt-price-table th,
+.flt-price-table td {
+  border: 1px solid #eef0f2;
+  text-align: center;
+  padding: 7px 10px;
+  white-space: nowrap;
+}
+.flt-price-table thead th {
+  position: sticky;
+  top: 0;
+  background: #f6fbf8;
+  color: #06c755;
+  font-weight: 700;
+  z-index: 2;
+}
+.flt-price-air { text-align: left; font-weight: 600; color: #333; }
+.flt-price-route { text-align: left; font-weight: 600; color: #222; }
+.flt-price-code { display: block; font-weight: 400; font-size: 11px; color: #999; }
+.flt-price-num { font-variant-numeric: tabular-nums; color: #222; }
+.flt-price-round { background: #f3f8ff; }
+.flt-price-round .flt-price-route { color: #1a5fb4; }
+.flt-price-round .flt-price-num { font-weight: 700; color: #1a5fb4; }
+@media (max-width: 860px) {
+  .flt-price-table { font-size: 11px; min-width: 460px; }
+  .flt-price-table th,
+  .flt-price-table td { padding: 5px 5px; }
+}
