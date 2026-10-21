@@ -34,3 +34,6 @@ _discarded/
 # ---- 航班抓取結果(tickets), 執行期產生, 不入库 ----
 FlyTicket/Uniair/tickets/
 FlyTicket/Mandarin/tickets/
+
+# ---- ComfyAPI 輸入圖片(執行期使用, 不入库) ----
+ComfyAPI/input/

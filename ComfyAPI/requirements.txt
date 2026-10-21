@@ -3,3 +3,5 @@ uvicorn
 python-multipart
 requests
 websocket-client
+opencv-python
+numpy

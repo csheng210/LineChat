@@ -2,5 +2,12 @@
   "extraPaths": [
     "LineChatActions/src/py",
     "LineChatEventHandle"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "ComfyAPI",
+      "venvPath": "ComfyAPI",
+      "venv": ".venv"
+    }
   ]
 }
