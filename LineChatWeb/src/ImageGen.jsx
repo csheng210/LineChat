@@ -103,9 +103,23 @@ export default function ImageGen({ active }) {
   useEffect(() => {
     const isVid = image1 && image1.type && image1.type.startsWith('video/')
     if (!isReverse || !isVid) { setVideoUrl(''); return }
-    const url = URL.createObjectURL(image1)
-    setVideoUrl(url)
-    return () => URL.revokeObjectURL(url)
+    let url = ''
+    let cancelled = false
+    const fd = new FormData()
+    fd.append('video', image1)
+    fetch('/comfy/video/preview', { method: 'POST', body: fd })
+      .then((res) => (res.ok ? res.blob() : Promise.reject(res)))
+      .then((blob) => {
+        if (cancelled) return
+        url = URL.createObjectURL(blob)
+        setVideoUrl(url)
+      })
+      .catch(() => {
+        if (cancelled) return
+        url = URL.createObjectURL(image1) // 轉檔失敗時退回原始來源
+        setVideoUrl(url)
+      })
+    return () => { cancelled = true; if (url) URL.revokeObjectURL(url) }
   }, [image1, isReverse])
 
   async function onPickImage(slot, file) {

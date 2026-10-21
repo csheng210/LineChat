@@ -5,3 +5,4 @@ requests
 websocket-client
 opencv-python
 numpy
+imageio-ffmpeg

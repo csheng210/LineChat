@@ -101,6 +101,40 @@ def _temp_png(data: bytes) -> str:
         f.write(data)
     return path
 
+@app.post("/video/preview")
+def video_preview(video: UploadFile = File(..., description="輸入影片")):
+    # 將上傳影片即時轉檔為 H.264/AAC, 供瀏覽器 <video> 預覽(mp4v 等瀏覽器解不了的編碼也能播)
+    data = video.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="video 為空")
+    src = _temp_upload(data, video.filename, ".mp4")
+    fd, out = tempfile.mkstemp(suffix=".mp4")
+    os.close(fd)
+    try:
+        import subprocess
+        import imageio_ffmpeg
+        ff = imageio_ffmpeg.get_ffmpeg_exe()
+        r = subprocess.run(
+            [ff, "-y", "-i", src, "-c:v", "libx264", "-preset", "veryfast",
+             "-crf", "28", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+             "-c:a", "aac", "-b:a", "128k", out],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0 or not os.path.exists(out) or os.path.getsize(out) == 0:
+            raise HTTPException(
+                status_code=422,
+                detail="無法轉檔為可播放影片: " + (r.stderr[-300:] if r.stderr else ""),
+            )
+        with open(out, "rb") as f:
+            out_bytes = f.read()
+    finally:
+        for _p in (src, out):
+            try:
+                os.remove(_p)
+            except OSError:
+                pass
+    return Response(content=out_bytes, media_type="video/mp4")
+
 
 def _respond(image_bytes: bytes, out_prompt: str, as_json: Optional[bool] = False):
     if as_json:
