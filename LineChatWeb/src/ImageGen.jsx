@@ -95,6 +95,7 @@ export default function ImageGen({ active }) {
   const isVideo = active === 'image2video'
   const isReverse = active === 'reversePrompt'
   const isTextVideo = active === 'text2video'
+  const isFl2v = active === 'images2video'
   const [copied, setCopied] = useState(false)
 
   async function onPickImage(slot, file) {
@@ -116,11 +117,12 @@ export default function ImageGen({ active }) {
   }
 
   function validate() {
-    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'reversePrompt' && !prompt.trim()) return '請輸入提示詞'
+    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'images2video' && active !== 'reversePrompt' && !prompt.trim()) return '請輸入提示詞'
     if (active === 'reversePrompt') return image1 ? '' : '請選擇圖片或影片'
     if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
+    if (active === 'images2video' && (!image1 || !image2)) return '請選擇首圖與尾圖'
     return ''
   }
 
@@ -148,6 +150,15 @@ export default function ImageGen({ active }) {
       }
       fd.append('image', image1)
       return { endpoint: '/job/image2prompt', form: fd }
+    }
+    if (active === 'images2video') {
+      const fd = new FormData()
+      fd.append('first_image', image1)
+      fd.append('last_image', image2)
+      fd.append('duration', String(Number(duration)))
+      if (prompt.trim()) fd.append('prompt', prompt.trim())
+      if (seed !== '' && seed != null) fd.append('seed', String(Number(seed)))
+      return { endpoint: '/job/images2video', form: fd }
     }
     const fd = new FormData()
     fd.append('prompt', prompt.trim() || (isVideo ? DEFAULT_VIDEO_PROMPT : ''))
@@ -204,8 +215,8 @@ export default function ImageGen({ active }) {
   }
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
-  const showDuration = isVideo // 圖生影片才顯示秒數
-  const showImages = active === 'image1' || active === 'image2' || isVideo || active === 'bgremove' || active === 'upscale' || isReverse
+  const showDuration = isVideo || isFl2v // 圖生影片/首尾圖生影片才顯示秒數
+  const showImages = active === 'image1' || active === 'image2' || isVideo || isFl2v || active === 'bgremove' || active === 'upscale' || isReverse
   const pct = Math.round(progress * 100)
 
   return (
@@ -221,7 +232,7 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {isReverse ? '輸入圖/影片' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {isReverse ? '輸入圖/影片' : isFl2v ? '首圖（第一幀）' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
@@ -234,9 +245,9 @@ export default function ImageGen({ active }) {
                   <div className="gen-thumb gen-thumb-empty">{isReverse ? '＋ 選擇圖片/影片' : '＋ 選擇圖片'}</div>
                 )}
               </label>
-              {active === 'image2' && (
+              {(active === 'image2' || isFl2v) && (
                 <label className="gen-upload">
-                  <span className="gen-upload-label">圖二（參考圖）</span>
+                  <span className="gen-upload-label">{isFl2v ? '尾圖（最後一幀）' : '圖二（參考圖）'}</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -279,7 +290,7 @@ export default function ImageGen({ active }) {
               <textarea
                 className="gen-textarea"
                 rows={3}
-                placeholder={(isVideo || isTextVideo) ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
+                placeholder={isFl2v ? '選填: 描述首圖到尾圖的動作/鏡頭變化, 例: 鏡頭緩慢推進, 人物轉身' : (isVideo || isTextVideo) ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
                 value={prompt}
                 onChange={(e) => setForm(active, { prompt: e.target.value })}
               />

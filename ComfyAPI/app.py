@@ -5,12 +5,14 @@ ComfyUI 生圖服務（FastAPI）
   GET  /health          健康檢查
   POST /text2img        純文生圖（JSON body, 同步回傳）
   POST /text2video      純文生影片（JSON body, 同步回傳）
+  POST /images2video    首尾圖生影片（multipart：first_image + last_image + duration, 同步回傳）
   POST /image1/edit     單圖編輯（multipart：image + prompt, 同步回傳）
   POST /image2/edit     雙圖編輯（multipart：image1 + image2 + prompt, 同步回傳）
 
   非同步(供前端進度條輪詢):
   POST /job/text2img    送任務 -> {"job_id":...}
   POST /job/text2video  送任務 -> {"job_id":...}
+  POST /job/images2video 首尾圖生影片 送任務 -> {"job_id":...}
   POST /job/image1      送任務 -> {"job_id":...}
   POST /job/image2      送任務 -> {"job_id":...}
   GET  /job?id=         輪詢 -> {status, progress(0..1), image_base64, prompt, error}
@@ -67,6 +69,7 @@ import run_image1_edit
 import run_image2_edit
 import run_image2video
 import run_text2video
+import run_images2video
 import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
@@ -202,6 +205,34 @@ def image2video(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.remove(path)
+    return _respond_video(video_bytes, as_json)
+
+@app.post("/images2video")
+def images2video(
+    first_image: UploadFile = File(..., description="首圖（影片第一幀）"),
+    last_image: UploadFile = File(..., description="尾圖（影片最後一幀）"),
+    duration: Optional[int] = Form(6, description="影片秒數"),
+    prompt: Optional[str] = Form(None, description="提示詞（選填，描述過渡動態）"),
+    seed: Optional[int] = Form(-1),
+    as_json: Optional[bool] = Form(False),
+):
+    d1, d2 = first_image.file.read(), last_image.file.read()
+    if not d1 or not d2:
+        raise HTTPException(status_code=400, detail="first_image/last_image 不可為空")
+    p1 = _temp_upload(d1, first_image.filename, ".png")
+    p2 = _temp_upload(d2, last_image.filename, ".png")
+    try:
+        video_bytes = run_images2video.generate(
+            first_path=p1, last_path=p2, duration=duration, prompt=prompt, seed=seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in (p1, p2):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
     return _respond_video(video_bytes, as_json)
 
 @app.post("/text2video")
@@ -542,6 +573,36 @@ def job_image2video(
                 os.remove(path)
             except OSError:
                 pass
+
+    _start_video_job(job_id, runner)
+    return {"job_id": job_id}
+
+@app.post("/job/images2video")
+def job_images2video(
+    first_image: UploadFile = File(...),
+    last_image: UploadFile = File(...),
+    duration: Optional[int] = Form(6),
+    prompt: Optional[str] = Form(None),
+    seed: Optional[int] = Form(-1),
+):
+    d1, d2 = first_image.file.read(), last_image.file.read()
+    if not d1 or not d2:
+        raise HTTPException(status_code=400, detail="first_image/last_image 不可為空")
+    p1 = _temp_upload(d1, first_image.filename, ".png")
+    p2 = _temp_upload(d2, last_image.filename, ".png")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_images2video.generate(
+                first_path=p1, last_path=p2, duration=duration, prompt=prompt, seed=seed,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            for p in (p1, p2):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
 
     _start_video_job(job_id, runner)
     return {"job_id": job_id}

@@ -37,3 +37,4 @@ FlyTicket/Mandarin/tickets/
 
 # ---- ComfyAPI 輸入圖片(執行期使用, 不入库) ----
 ComfyAPI/input/
+*.log.err

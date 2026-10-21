@@ -65,6 +65,18 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'images2video',
+    label: '首尾圖生影片',
+    desc: '首圖 + 尾圖 + 秒數, 產出一段影片',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="5" width="20" height="14" rx="2" />
+        <path d="M7 5v14M17 5v14" />
+        <path d="m10 9 4 3-4 3z" />
+      </svg>
+    ),
+  },
+  {
     id: 'text2video',
     label: '文生影片',
     desc: '輸入提示詞, 產出一段影片(可設秒數與長寬)',
