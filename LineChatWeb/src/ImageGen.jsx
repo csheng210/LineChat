@@ -94,6 +94,7 @@ export default function ImageGen({ active }) {
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
   const isVideo = active === 'image2video'
   const isReverse = active === 'reversePrompt'
+  const isTextVideo = active === 'text2video'
   const [copied, setCopied] = useState(false)
 
   async function onPickImage(slot, file) {
@@ -129,6 +130,12 @@ export default function ImageGen({ active }) {
       return {
         endpoint: '/job/text2img',
         json: { prompt: prompt.trim(), width: Number(width), height: Number(height), seed: Number(seed) },
+      }
+    }
+    if (active === 'text2video') {
+      return {
+        endpoint: '/job/text2video',
+        json: { prompt: prompt.trim(), duration: Number(duration), width: Number(width), height: Number(height), seed: Number(seed) },
       }
     }
     if (active === 'reversePrompt') {
@@ -272,7 +279,7 @@ export default function ImageGen({ active }) {
               <textarea
                 className="gen-textarea"
                 rows={3}
-                placeholder={isVideo ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
+                placeholder={(isVideo || isTextVideo) ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
                 value={prompt}
                 onChange={(e) => setForm(active, { prompt: e.target.value })}
               />
@@ -298,6 +305,27 @@ export default function ImageGen({ active }) {
 
           {showDuration && (
             <div className="gen-row">
+              <label className="gen-num">
+                <span className="gen-field-label">秒數</span>
+                <input type="number" min="5" max="60" value={duration} onChange={(e) => setForm(active, { duration: e.target.value })} />
+              </label>
+              <label className="gen-num">
+                <span className="gen-field-label">種子(-1 隨機)</span>
+                <input type="number" value={seed} onChange={(e) => setForm(active, { seed: e.target.value })} />
+              </label>
+            </div>
+          )}
+
+          {isTextVideo && (
+            <div className="gen-row">
+              <label className="gen-num">
+                <span className="gen-field-label">寬</span>
+                <input type="number" min="64" max="4096" value={width} onChange={(e) => setForm(active, { width: e.target.value })} />
+              </label>
+              <label className="gen-num">
+                <span className="gen-field-label">高</span>
+                <input type="number" min="64" max="4096" value={height} onChange={(e) => setForm(active, { height: e.target.value })} />
+              </label>
               <label className="gen-num">
                 <span className="gen-field-label">秒數</span>
                 <input type="number" min="5" max="60" value={duration} onChange={(e) => setForm(active, { duration: e.target.value })} />

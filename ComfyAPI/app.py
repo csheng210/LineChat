@@ -4,11 +4,13 @@ ComfyUI 生圖服務（FastAPI）
 包裝本目錄三個生圖腳本，對外提供 HTTP 服務：
   GET  /health          健康檢查
   POST /text2img        純文生圖（JSON body, 同步回傳）
+  POST /text2video      純文生影片（JSON body, 同步回傳）
   POST /image1/edit     單圖編輯（multipart：image + prompt, 同步回傳）
   POST /image2/edit     雙圖編輯（multipart：image1 + image2 + prompt, 同步回傳）
 
   非同步(供前端進度條輪詢):
   POST /job/text2img    送任務 -> {"job_id":...}
+  POST /job/text2video  送任務 -> {"job_id":...}
   POST /job/image1      送任務 -> {"job_id":...}
   POST /job/image2      送任務 -> {"job_id":...}
   GET  /job?id=         輪詢 -> {status, progress(0..1), image_base64, prompt, error}
@@ -64,6 +66,7 @@ import run_text2img
 import run_image1_edit
 import run_image2_edit
 import run_image2video
+import run_text2video
 import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
@@ -76,6 +79,14 @@ class Text2ImgRequest(BaseModel):
     prompt: str
     width: Optional[int] = 1024
     height: Optional[int] = 1024
+    seed: Optional[int] = -1
+    as_json: Optional[bool] = False
+
+class Text2VideoRequest(BaseModel):
+    prompt: str
+    duration: Optional[int] = 8
+    width: Optional[int] = 864
+    height: Optional[int] = 480
     seed: Optional[int] = -1
     as_json: Optional[bool] = False
 
@@ -192,6 +203,17 @@ def image2video(
     finally:
         os.remove(path)
     return _respond_video(video_bytes, as_json)
+
+@app.post("/text2video")
+def text2video(req: Text2VideoRequest):
+    try:
+        video_bytes = run_text2video.generate(
+            prompt=req.prompt, duration=req.duration, width=req.width, height=req.height,
+            seed=req.seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return _respond_video(video_bytes, req.as_json)
 
 
 @app.post("/bgremove")
@@ -522,6 +544,14 @@ def job_image2video(
                 pass
 
     _start_video_job(job_id, runner)
+    return {"job_id": job_id}
+
+@app.post("/job/text2video")
+def job_text2video(req: Text2VideoRequest):
+    job_id = _new_job()
+    _start_video_job(job_id, lambda cb, cancel_event, prompt_id_cb: run_text2video.generate(
+        prompt=req.prompt, duration=req.duration, width=req.width, height=req.height,
+        seed=req.seed, log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb))
     return {"job_id": job_id}
 
 

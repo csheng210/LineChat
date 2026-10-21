@@ -65,6 +65,17 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'text2video',
+    label: '文生影片',
+    desc: '輸入提示詞, 產出一段影片(可設秒數與長寬)',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="3" width="20" height="18" rx="2" />
+        <path d="M7 3v18M17 3v18M2 8h5M2 16h5M17 8h5M17 16h5" />
+      </svg>
+    ),
+  },
+  {
     id: 'reversePrompt',
     label: '反推提示詞',
     desc: '一張圖或一段影片 → 反推出一段提示詞',

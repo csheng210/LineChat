@@ -84,10 +84,15 @@ export default function FlightBoard({ route }) {
     const end = `${ym.y}-${pad2(ym.m)}-${pad2(lastDay)}`
     const url = FLIGHTS + '/flights?dep=' + encodeURIComponent(dep) + '&arr=' + encodeURIComponent(arr) + '&start=' + start + '&end=' + end + '&airline=all'
     fetch(url)
-      .then((r) => r.json().catch(() => ({})).then((d) => ({ ok: r.ok, d })))
-      .then(({ ok, d }) => {
+      .then(async (r) => { const d = await r.json().catch(() => ({})); return { ok: r.ok, status: r.status, d } })
+      .then(({ ok, status, d }) => {
         if (cancelled) return
-        if (!ok || !d.ok) { setError(d.error || ('抓取失敗 (HTTP ' + (d.httpStatus || '?') + ')')); setData(null) }
+        if (!ok || !d.ok) {
+          const hint = (status === 502 || status === 503 || status === 504)
+            ? '航班後端 (FlyTicketAPI) 未啟動，請執行 Start-LineChat 啟動航班服務'
+            : (d.訊息 || d.error || ('抓取失敗 (HTTP ' + status + ')'))
+          setError(hint); setData(null)
+        }
         else setData(d)
       })
       .catch((e) => { if (!cancelled) setError('抓取失敗: ' + e.message) })
