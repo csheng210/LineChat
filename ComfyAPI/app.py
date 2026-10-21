@@ -70,6 +70,7 @@ import run_image2_edit
 import run_image2video
 import run_text2video
 import run_images2video
+import run_ref2video
 import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
@@ -267,6 +268,40 @@ def images2video(
                 os.remove(p)
             except OSError:
                 pass
+    return _respond_video(video_bytes, as_json)
+
+@app.post("/ref2video")
+def ref2video(
+    image: UploadFile = File(..., description="參考圖（主角外觀）"),
+    video: UploadFile = File(..., description="參考影片（動作/運鏡）"),
+    audio: Optional[UploadFile] = File(None, description="參考音訊（選填）"),
+    duration: Optional[int] = Form(6, description="輸出影片秒數"),
+    prompt: Optional[str] = Form(None, description="提示詞（選填）"),
+    seed: Optional[int] = Form(-1),
+    as_json: Optional[bool] = Form(False),
+):
+    d_img = image.file.read()
+    d_vid = video.file.read()
+    d_aud = audio.file.read() if audio else None
+    if not d_img or not d_vid:
+        raise HTTPException(status_code=400, detail="image/video 不可為空")
+    p_img = _temp_upload(d_img, image.filename, ".png")
+    p_vid = _temp_upload(d_vid, video.filename, ".mp4")
+    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if d_aud else None
+    try:
+        video_bytes = run_ref2video.generate(
+            image_path=p_img, video_path=p_vid, audio_path=p_aud, duration=duration,
+            prompt=prompt, seed=seed, log=lambda *_: None
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        for p in (p_img, p_vid, p_aud):
+            if p:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
     return _respond_video(video_bytes, as_json)
 
 @app.post("/text2video")
@@ -637,6 +672,42 @@ def job_images2video(
                     os.remove(p)
                 except OSError:
                     pass
+
+    _start_video_job(job_id, runner)
+    return {"job_id": job_id}
+
+@app.post("/job/ref2video")
+def job_ref2video(
+    image: UploadFile = File(...),
+    video: UploadFile = File(...),
+    audio: Optional[UploadFile] = File(None),
+    duration: Optional[int] = Form(6),
+    prompt: Optional[str] = Form(None),
+    seed: Optional[int] = Form(-1),
+):
+    d_img = image.file.read()
+    d_vid = video.file.read()
+    d_aud = audio.file.read() if audio else None
+    if not d_img or not d_vid:
+        raise HTTPException(status_code=400, detail="image/video 不可為空")
+    p_img = _temp_upload(d_img, image.filename, ".png")
+    p_vid = _temp_upload(d_vid, video.filename, ".mp4")
+    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if d_aud else None
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_ref2video.generate(
+                image_path=p_img, video_path=p_vid, audio_path=p_aud, duration=duration,
+                prompt=prompt, seed=seed, log=lambda *_: None, progress_cb=cb,
+                cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            for p in (p_img, p_vid, p_aud):
+                if p:
+                    try:
+                        os.remove(p)
+                    except OSError:
+                        pass
 
     _start_video_job(job_id, runner)
     return {"job_id": job_id}
