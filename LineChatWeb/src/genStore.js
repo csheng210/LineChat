@@ -21,6 +21,7 @@ export const DEFAULT_FORM = {
   image2: null, // File
   preview1: '',
   preview2: '',
+  target: '', // 反推提示詞: 目標模型預設(image/video)
 }
 
 export const EMPTY_JOB = {
@@ -104,8 +105,10 @@ async function pollJob(id, jobId) {
           ? { video: 'data:video/mp4;base64,' + data.video_base64 }
           : data.image_base64
             ? { image: 'data:image/png;base64,' + data.image_base64, prompt: data.prompt || '' }
-            : null
-        if (!out) throw new Error('後端未回傳圖片')
+            : data.prompt
+              ? { prompt: data.prompt }
+              : null
+        if (!out) throw new Error('後端未回傳結果')
         persistJobId(id, null)
         setJob(id, { jobId: null, busy: false, progress: 1, phase: '', cancelling: false, stopped: false, error: '', result: out })
         return

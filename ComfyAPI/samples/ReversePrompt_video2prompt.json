@@ -1,0 +1,54 @@
+{
+  "16": {
+    "inputs": {
+      "video": "MiniMax_H3_00002.mp4",
+      "force_rate": 0,
+      "custom_width": 0,
+      "custom_height": 0,
+      "frame_load_cap": 0,
+      "skip_first_frames": 0,
+      "select_every_nth": 1,
+      "format": "None"
+    },
+    "class_type": "VHS_LoadVideo",
+    "_meta": {
+      "title": "Load Video (Upload) 🎥🅥🅗🅢"
+    }
+  },
+  "18": {
+    "inputs": {
+      "source": [
+        "23",
+        0
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "預覽任意"
+    }
+  },
+  "23": {
+    "inputs": {
+      "base_url": "http://svc.summer-blue.com:8189/v1",
+      "model": "swift-1.5-iq3_xxs",
+      "api_key": "llamacpp",
+      "target": "hailuo",
+      "max_frames": 8,
+      "max_side": 1024,
+      "jpeg_quality": 88,
+      "temperature": 0.4,
+      "max_tokens": 2432,
+      "timeout": 180,
+      "retries": 2,
+      "extra": "",
+      "image": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "ReversePrompt",
+    "_meta": {
+      "title": "反推提示詞 (Image/Video -> Prompt)"
+    }
+  }
+}

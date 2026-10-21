@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import {
   DEFAULT_FORM,
@@ -25,16 +25,76 @@ function fileToBase64Preview(file) {
   })
 }
 
+// 影片: 抓一帧當縮圖預覽(mp4 用 <video> 常顯示黑畫面, 改抓帧成圖片較可靠)。
+function captureVideoFrame(file, { time = 0.1, maxWidth = 480 } = {}) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file)
+    const video = document.createElement('video')
+    video.muted = true
+    video.playsInline = true
+    video.preload = 'auto'
+    let done = false
+    const finish = (out) => {
+      if (done) return
+      done = true
+      URL.revokeObjectURL(url)
+      resolve(out)
+    }
+    const draw = () => {
+      const vw = video.videoWidth || 480
+      const vh = video.videoHeight || 270
+      const scale = Math.min(1, maxWidth / vw)
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(vw * scale))
+      canvas.height = Math.max(1, Math.round(vh * scale))
+      const ctx = canvas.getContext('2d')
+      try { ctx.drawImage(video, 0, 0, canvas.width, canvas.height) } catch (e) {}
+      let out = ''
+      try { out = canvas.toDataURL('image/jpeg', 0.82) } catch (e) { out = '' }
+      finish(out)
+    }
+    video.addEventListener('loadeddata', () => {
+      try {
+        const dur = isFinite(video.duration) ? video.duration : time
+        video.currentTime = Math.min(time, dur * 0.5)
+      } catch (e) {
+        draw()
+      }
+    })
+    video.addEventListener('seeked', draw)
+    video.addEventListener('error', () => finish(''))
+    setTimeout(draw, 1500) // 安全兜底: seek 未觸發時仍出一張
+    video.src = url
+  })
+}
+
+// 向後端要縮圖(影片首帧/圖片轉 JPEG): 瀏覽器不支援的編碼也能出圖。
+async function fetchVideoThumb(file) {
+  const fd = new FormData()
+  fd.append('video', file)
+  const res = await fetch('/comfy/thumbnail', { method: 'POST', body: fd })
+  if (!res.ok) return ''
+  const blob = await res.blob()
+  return await new Promise((resolve) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result)
+    reader.onerror = () => resolve('')
+    reader.readAsDataURL(blob)
+  })
+}
+
 export default function ImageGen({ active }) {
   const snap = useSyncExternalStore(subscribe, getSnapshot)
   const form = snap.forms[active] || DEFAULT_FORM
   const job = snap.jobs[active] || EMPTY_JOB
 
-  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2 } = form
+  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target } = form
   const { busy, progress, phase, cancelling, stopped, error, result } = job
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
   const isVideo = active === 'image2video'
+  const isReverse = active === 'reversePrompt'
+  const [copied, setCopied] = useState(false)
 
   async function onPickImage(slot, file) {
     if (!file) {
@@ -42,13 +102,21 @@ export default function ImageGen({ active }) {
       else setForm(active, { image2: null, preview2: '' })
       return
     }
-    const url = await fileToBase64Preview(file)
+    const isVid = !!(file.type && file.type.startsWith('video/'))
+    let url
+    if (isVid) {
+      url = await fetchVideoThumb(file)
+      if (!url) url = await captureVideoFrame(file) // 後端抓帧失敗時退回前端抓帧
+    } else {
+      url = await fileToBase64Preview(file)
+    }
     if (slot === 1) setForm(active, { image1: file, preview1: url })
     else setForm(active, { image2: file, preview2: url })
   }
 
   function validate() {
-    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && !prompt.trim()) return '請輸入提示詞'
+    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'reversePrompt' && !prompt.trim()) return '請輸入提示詞'
+    if (active === 'reversePrompt') return image1 ? '' : '請選擇圖片或影片'
     if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
@@ -62,6 +130,17 @@ export default function ImageGen({ active }) {
         endpoint: '/job/text2img',
         json: { prompt: prompt.trim(), width: Number(width), height: Number(height), seed: Number(seed) },
       }
+    }
+    if (active === 'reversePrompt') {
+      const fd = new FormData()
+      if (target) fd.append('target', target)
+      const isVid = image1.type && image1.type.startsWith('video/')
+      if (isVid) {
+        fd.append('video', image1)
+        return { endpoint: '/job/video2prompt', form: fd }
+      }
+      fd.append('image', image1)
+      return { endpoint: '/job/image2prompt', form: fd }
     }
     const fd = new FormData()
     fd.append('prompt', prompt.trim() || (isVideo ? DEFAULT_VIDEO_PROMPT : ''))
@@ -93,6 +172,7 @@ export default function ImageGen({ active }) {
   function saveResult() {
     if (!result) return
     const video = !!result.video
+    const image = !!result.image
     const src = video ? result.video : result.image
     if (!src) return
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
@@ -104,9 +184,21 @@ export default function ImageGen({ active }) {
     a.remove()
   }
 
+  // 一鍵複製反推提示詞到剪貼簿
+  async function copyPrompt() {
+    if (!result?.prompt) return
+    try {
+      await navigator.clipboard.writeText(result.prompt)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1800)
+    } catch {
+      setCopied(false)
+    }
+  }
+
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo // 圖生影片才顯示秒數
-  const showImages = active === 'image1' || active === 'image2' || isVideo || active === 'bgremove' || active === 'upscale'
+  const showImages = active === 'image1' || active === 'image2' || isVideo || active === 'bgremove' || active === 'upscale' || isReverse
   const pct = Math.round(progress * 100)
 
   return (
@@ -122,17 +214,17 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {(isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {isReverse ? '輸入圖/影片' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
-                  accept="image/*"
+                  accept={isReverse ? 'image/*,video/*' : 'image/*'}
                   onChange={(e) => onPickImage(1, e.target.files[0])}
                 />
                 {preview1 ? (
-                  <img className="gen-thumb" src={preview1} alt="圖一預覽" />
+                  <img className="gen-thumb" src={preview1} alt="輸入預覽" />
                 ) : (
-                  <div className="gen-thumb gen-thumb-empty">＋ 選擇圖片</div>
+                  <div className="gen-thumb gen-thumb-empty">{isReverse ? '＋ 選擇圖片/影片' : '＋ 選擇圖片'}</div>
                 )}
               </label>
               {active === 'image2' && (
@@ -153,16 +245,39 @@ export default function ImageGen({ active }) {
             </div>
           )}
 
-          <label className="gen-field">
-            <span className="gen-field-label">提示詞</span>
-            <textarea
-              className="gen-textarea"
-              rows={3}
-              placeholder={isVideo ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
-              value={prompt}
-              onChange={(e) => setForm(active, { prompt: e.target.value })}
-            />
-          </label>
+          {isReverse ? (
+            <label className="gen-field">
+              <span className="gen-field-label">目標模型（選填, 讓提示詞風格貼近該模型）</span>
+              <select className="gen-textarea" value={target} onChange={(e) => setForm(active, { target: e.target.value })}>
+                <option value="">（通用, 不指定）</option>
+                <optgroup label="生圖模型">
+                  <option value="qwen-image">Qwen-Image</option>
+                  <option value="flux">Flux.1</option>
+                  <option value="sd">Stable Diffusion</option>
+                  <option value="midjourney">Midjourney</option>
+                  <option value="dalle">DALL-E 3</option>
+                </optgroup>
+                <optgroup label="生影片模型">
+                  <option value="veo">Veo 3.1</option>
+                  <option value="kling">Kling 3.0</option>
+                  <option value="runway">Runway Gen-4.5</option>
+                  <option value="wan">Wan 2.5</option>
+                  <option value="hailuo">Hailuo / MiniMax</option>
+                </optgroup>
+              </select>
+            </label>
+          ) : (
+            <label className="gen-field">
+              <span className="gen-field-label">提示詞</span>
+              <textarea
+                className="gen-textarea"
+                rows={3}
+                placeholder={isVideo ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
+                value={prompt}
+                onChange={(e) => setForm(active, { prompt: e.target.value })}
+              />
+            </label>
+          )}
 
           {showSize && (
             <div className="gen-row">
@@ -223,14 +338,42 @@ export default function ImageGen({ active }) {
           {result ? (
             <>
               <div className="gen-result-actions">
-                <button className="gen-save" onClick={saveResult}>儲存{result.video ? '影片' : '圖片'}</button>
+                {result.video || result.image ? (
+                  <button className="gen-save" onClick={saveResult}>
+                    {result.video ? '儲存影片' : '儲存圖片'}
+                  </button>
+                ) : (
+                  <button className="gen-copy" onClick={copyPrompt}>
+                    {copied ? (
+                      <>
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M20 6 9 17l-5-5" />
+                        </svg>
+                        已複製
+                      </>
+                    ) : (
+                      <>
+                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="11" height="11" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        複製提示詞
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
               {result.video ? (
                 <video className="gen-result-video" src={result.video} controls autoPlay loop playsInline />
-              ) : (
+              ) : result.image ? (
                 <img className="gen-result-img" src={result.image} alt="生成結果" />
+              ) : (
+                <div className="gen-result-prompt gen-result-prompt-only">
+                  <div className="gen-result-prompt-title">反推提示詞</div>
+                  <p>{result.prompt}</p>
+                </div>
               )}
-              {result.prompt && (
+              {result.prompt && (result.image || result.video) && (
                 <div className="gen-result-prompt">
                   <div className="gen-result-prompt-title">輸出提示詞</div>
                   <p>{result.prompt}</p>

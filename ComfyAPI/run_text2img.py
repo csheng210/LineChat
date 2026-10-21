@@ -15,6 +15,7 @@ import json
 import random
 import time
 from pathlib import Path
+from typing import Optional
 
 import comfy_core as core
 
@@ -48,14 +49,16 @@ def build_workflow(prompt_text, width, height, seed, wf_path):
     return wf
 
 
-def generate(prompt, width=1024, height=1024, seed=-1,
+def generate(prompt, width: Optional[int] = 1024, height: Optional[int] = 1024, seed: Optional[int] = -1,
              workflow=None, output=None, return_bytes=False, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """純文生圖。回傳 (輸出圖 bytes, 輸出提示詞)；若給 output 則同時存檔。"""
     wf_path = Path(workflow) if workflow else DEFAULT_WORKFLOW
     if not wf_path.is_file():
         raise FileNotFoundError(f"找不到工作流檔案：{wf_path}")
 
-    seed = seed if seed >= 0 else random.randint(0, core.SEED_MAX)
+    width = width if width is not None else 1024
+    height = height if height is not None else 1024
+    seed = seed if seed is not None and seed >= 0 else random.randint(0, core.SEED_MAX)
     wf = build_workflow(prompt, width, height, seed, wf_path)
     log(f"workflow={wf_path.name}, size={width}x{height}, seed={seed}")
 

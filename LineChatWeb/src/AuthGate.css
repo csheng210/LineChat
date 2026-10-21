@@ -596,6 +596,12 @@
   align-self: flex-start;
 }
 
+.gen-result-prompt-only {
+  max-width: 860px;
+  width: 100%;
+  min-height: 120px;
+}
+
 .gen-result-prompt {
   max-width: 720px;
   padding: 12px 14px;
@@ -779,6 +785,28 @@
 .gen-save:hover {
   background: #eaf9ef;
 }
+.gen-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #06c755;
+  background: #fff;
+  border: 1px solid #06c755;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.gen-copy:hover {
+  background: #eaf9ef;
+}
+
+.gen-copy svg {
+  flex-shrink: 0;
+}
+
 .gen-result-video {
   max-width: 100%;
   max-height: 60vh;

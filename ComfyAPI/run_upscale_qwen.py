@@ -16,6 +16,7 @@ import json
 import random
 import time
 from pathlib import Path
+from typing import Optional
 
 import comfy_core as core
 
@@ -49,7 +50,7 @@ def build_workflow(image_name, prompt_text, seed, wf_path):
     return wf
 
 
-def generate(image_path, prompt=None, width=None, height=None, seed=-1,
+def generate(image_path, prompt=None, width: Optional[int] = None, height: Optional[int] = None, seed: Optional[int] = -1,
              workflow=None, output=None, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """放大圖片（Qwen 圖片編輯）。回傳 (輸出圖 bytes, 提示詞)；若給 output 則同時存檔。"""
     wf_path = Path(workflow) if workflow else DEFAULT_WORKFLOW
@@ -60,7 +61,7 @@ def generate(image_path, prompt=None, width=None, height=None, seed=-1,
         raise FileNotFoundError(f"找不到輸入圖：{img}")
 
     prompt = prompt if prompt else DEFAULT_PROMPT
-    seed = seed if seed >= 0 else random.randint(0, core.SEED_MAX)
+    seed = seed if seed is not None and seed >= 0 else random.randint(0, core.SEED_MAX)
 
     uploaded = core.upload_image(img)
     wf = build_workflow(uploaded, prompt, seed, wf_path)

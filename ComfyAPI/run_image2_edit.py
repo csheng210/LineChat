@@ -15,6 +15,7 @@ import json
 import random
 import time
 from pathlib import Path
+from typing import Optional
 
 import comfy_core as core
 
@@ -62,7 +63,7 @@ def build_workflow(name1, name2, prompt_text, width, height, seed, wf_path):
     return wf
 
 
-def generate(image1, image2, prompt, width=None, height=None, seed=-1,
+def generate(image1, image2, prompt, width: Optional[int] = None, height: Optional[int] = None, seed: Optional[int] = -1,
              workflow=None, output=None, return_bytes=False, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """雙圖編輯。回傳 (輸出圖 bytes, 輸出提示詞)；若給 output 則同時存檔。"""
     wf_path = Path(workflow) if workflow else DEFAULT_WORKFLOW
@@ -78,7 +79,7 @@ def generate(image1, image2, prompt, width=None, height=None, seed=-1,
     dw, dh = size if size else (1024, 1024)
     width = width if width is not None else dw
     height = height if height is not None else dh
-    seed = seed if seed >= 0 else random.randint(0, core.SEED_MAX)
+    seed = seed if seed is not None and seed >= 0 else random.randint(0, core.SEED_MAX)
 
     name1 = core.upload_image(img1)
     name2 = core.upload_image(img2)

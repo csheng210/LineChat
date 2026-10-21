@@ -26,19 +26,48 @@ import tempfile
 import threading
 import uuid
 import urllib.parse
+import argparse
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException
 from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
+import cv2
+
 import comfy_core as core
+
+# 在 import 反推腳本前載入本目錄 .env, 讓 VTP_BASE_URL/VTP_MODEL/VTP_API_KEY 生效
+# (腳本於 import 時讀取 os.environ 作為預設值; 啟動腳本僅注入 COMFYAPI_PORT, 故需自行載入)
+def _load_local_env():
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    if not os.path.isfile(env_path):
+        return
+    with open(env_path, "r", encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].strip()
+            key, _, val = line.partition("=")
+            key = key.strip()
+            val = val.strip().strip(chr(34)).strip(chr(39))
+            if key and key not in os.environ:
+                os.environ[key] = val
+
+
+_load_local_env()
+
 import run_text2img
 import run_image1_edit
 import run_image2_edit
 import run_image2video
 import run_bgremove_qwen
 import run_upscale_qwen
+import run_video2prompt as rvp
+import run_image2prompt as rip
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -59,7 +88,7 @@ def _temp_png(data: bytes) -> str:
     return path
 
 
-def _respond(image_bytes: bytes, out_prompt: str, as_json: bool):
+def _respond(image_bytes: bytes, out_prompt: str, as_json: Optional[bool] = False):
     if as_json:
         return JSONResponse({
             "image_base64": base64.b64encode(image_bytes).decode("ascii"),
@@ -70,7 +99,7 @@ def _respond(image_bytes: bytes, out_prompt: str, as_json: bool):
     return resp
 
 
-def _respond_video(video_bytes: bytes, as_json: bool):
+def _respond_video(video_bytes: bytes, as_json: Optional[bool] = False):
     if as_json:
         return JSONResponse({"video_base64": base64.b64encode(video_bytes).decode("ascii")})
     return Response(content=video_bytes, media_type="video/mp4")
@@ -209,6 +238,72 @@ def upscale(
     finally:
         os.remove(path)
     return _respond(image_bytes, out_prompt, as_json)
+
+
+# ---- 反推提示詞(外部端點服務): 影片/圖片 -> 提示詞 ----
+def _temp_upload(data: bytes, filename: Optional[str], default_suffix: str) -> str:
+    suffix = Path(filename or "").suffix.lower() or default_suffix
+    fd, path = tempfile.mkstemp(suffix=suffix)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
+
+
+@app.post("/video2prompt")
+def video2prompt(
+    video: UploadFile = File(..., description="輸入影片"),
+    target: Optional[str] = Form(None, description="目標影片模型預設(veo/kling/runway/wan/hailuo...)"),
+    max_frames: Optional[int] = Form(None),
+    max_side: Optional[int] = Form(None),
+    temperature: Optional[float] = Form(None),
+    max_tokens: Optional[int] = Form(None),
+    extra: Optional[str] = Form(None),
+    base_url: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+):
+    data = video.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="video 為空")
+    path = _temp_upload(data, video.filename, ".mp4")
+    try:
+        prompt = rvp.generate(
+            video_path=path, target=target, max_frames=max_frames, max_side=max_side,
+            temperature=temperature, max_tokens=max_tokens, extra=extra,
+            base_url=base_url, model=model, api_key=api_key, log=lambda *_: None)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    return JSONResponse({"video": video.filename, "target": target, "prompt": prompt})
+
+
+@app.post("/image2prompt")
+def image2prompt(
+    image: UploadFile = File(..., description="輸入圖片"),
+    target: Optional[str] = Form(None, description="目標生圖模型預設(qwen-image/flux/sd/midjourney/dalle...)"),
+    max_side: Optional[int] = Form(None),
+    temperature: Optional[float] = Form(None),
+    max_tokens: Optional[int] = Form(None),
+    extra: Optional[str] = Form(None),
+    base_url: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_upload(data, image.filename, ".png")
+    try:
+        prompt = rip.generate(
+            image_path=path, target=target, max_side=max_side, temperature=temperature,
+            max_tokens=max_tokens, extra=extra, base_url=base_url, model=model,
+            api_key=api_key, log=lambda *_: None)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        os.remove(path)
+    return JSONResponse({"image": image.filename, "target": target, "prompt": prompt})
 
 
 # ---- 非同步任務(供前端進度條輪詢) ----
@@ -484,6 +579,159 @@ def job_upscale(
 
     _start_job(job_id, runner)
     return {"job_id": job_id}
+
+
+def _start_prompt_job(job_id, runner):
+    """反推提示詞任務: 走 ComfyUI ReversePrompt 工作流, runner(cb, cancel_event, prompt_id_cb) 回傳提示詞字串。"""
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def prompt_id_cb(pid):
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["prompt_id"] = pid
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+                j["progress"] = 0.05
+        try:
+            prompt = runner(progress_cb, cancel_event, prompt_id_cb)
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["prompt"] = prompt or ""
+        except core.CancelledError:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/job/image2prompt")
+def job_image2prompt(
+    image: UploadFile = File(...),
+    target: Optional[str] = Form(None),
+    max_side: Optional[int] = Form(None),
+    temperature: Optional[float] = Form(None),
+    max_tokens: Optional[int] = Form(None),
+    extra: Optional[str] = Form(None),
+):
+    data = image.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="image 為空")
+    path = _temp_upload(data, image.filename, ".png")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return rip.generate(
+                image_path=path, target=target, max_side=max_side, temperature=temperature,
+                max_tokens=max_tokens, extra=extra, log=lambda *_: None,
+                progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _start_prompt_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/job/video2prompt")
+def job_video2prompt(
+    video: UploadFile = File(...),
+    target: Optional[str] = Form(None),
+    max_frames: Optional[int] = Form(None),
+    max_side: Optional[int] = Form(None),
+    temperature: Optional[float] = Form(None),
+    max_tokens: Optional[int] = Form(None),
+    extra: Optional[str] = Form(None),
+):
+    data = video.file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="video 為空")
+    path = _temp_upload(data, video.filename, ".mp4")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return rvp.generate(
+                video_path=path, target=target, max_frames=max_frames, max_side=max_side,
+                temperature=temperature, max_tokens=max_tokens, extra=extra, log=lambda *_: None,
+                progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    _start_prompt_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/thumbnail")
+def thumbnail(video: Optional[UploadFile] = File(None), image: Optional[UploadFile] = File(None)):
+    """縮圖: 影片取首帧, 圖片原樣轉 JPEG。瀏覽器不支援的編碼(mp4v/HEVC)也能由後端抓帧。"""
+    import numpy as np
+    frame = None
+    tmp_path = None
+    try:
+        if video is not None:
+            data = video.file.read()
+            if not data:
+                raise HTTPException(status_code=400, detail="video 為空")
+            tmp_path = _temp_upload(data, video.filename, ".mp4")
+            cap = cv2.VideoCapture(tmp_path)
+            ok, frame = cap.read()
+            cap.release()
+        elif image is not None:
+            data = image.file.read()
+            if not data:
+                raise HTTPException(status_code=400, detail="image 為空")
+            arr = np.frombuffer(data, dtype=np.uint8)
+            frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        else:
+            raise HTTPException(status_code=400, detail="需提供 video 或 image")
+        if frame is None:
+            raise HTTPException(status_code=422, detail="無法讀取畫面(編碼不支援?)")
+        h, w = frame.shape[:2]
+        max_side = 480
+        scale = min(1.0, max_side / max(w, h))
+        if scale < 1.0:
+            frame = cv2.resize(frame, (max(1, int(w * scale)), max(1, int(h * scale))))
+        ok, buf = cv2.imencode(".jpg", frame, [int(cv2.IMWRITE_JPEG_QUALITY), 82])
+        if not ok:
+            raise HTTPException(status_code=500, detail="縮圖編碼失敗")
+        return Response(content=buf.tobytes(), media_type="image/jpeg")
+    finally:
+        if tmp_path:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 
 @app.post("/job/cancel")
