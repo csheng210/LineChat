@@ -196,6 +196,43 @@
   cursor: not-allowed;
 }
 
+/* popover 內更改密碼表單 */
+.auth-changepw-title {
+  font-size: 12px;
+  color: #555;
+  text-align: center;
+}
+
+.auth-ok {
+  color: #06c755;
+  font-size: 12px;
+  text-align: center;
+}
+
+.auth-changepw-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.auth-changepw-actions .auth-submit {
+  flex: 1;
+}
+
+.auth-cancel {
+  padding: 9px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #555;
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.auth-cancel:hover {
+  background: #f2f2f2;
+}
+
 /* 主內容 */
 .auth-content {
   flex: 1;
@@ -1479,4 +1516,124 @@
 }
 @media (max-width: 860px) {
   .gen-thumb-video { width: 200px; height: 130px; }
+}
+/* ---- 多媒體瀏覽(ResourcesBrowser) ---- */
+.res-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+.res-tab { padding: 7px 16px; font-size: 14px; color: #555; background: #f7f7f7; border: 1px solid #e6e6e6; border-radius: 8px; cursor: pointer; }
+.res-tab.active { color: #06c755; background: #eaf7ef; border-color: #b9e6cb; }
+.res-tab-sep { align-self: stretch; width: 1px; background: #dcdcdc; margin: 2px 0; }
+.res-tab-sub { background: #f3faf5; border-color: #d6e9dc; color: #1c7a3e; }
+.res-tab-group { display: inline-flex; align-items: center; gap: 0; }
+.res-tab-slash { padding: 0 3px; color: #999; font-size: 14px; }
+/* 縮圖牆: 由左至右排列, 依寬度自動換列(響應式) */
+.res-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+.res-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  text-align: left;
+  background: #fff;
+  border: 1px solid #e6e6e6;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.res-card:hover { border-color: #b9e6cb; }
+.res-card-dir:hover { border-color: #06c755; }
+.res-thumb-folder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #06c755;
+  background: #eaf7ef;
+}
+
+/* 目前路徑麵包屑 */
+.res-crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.res-crumb {
+  padding: 3px 8px;
+  font-size: 13px;
+  color: #06c755;
+  background: #f2f2f2;
+  border: 1px solid #e6e6e6;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.res-crumb:hover { background: #eaf7ef; }
+.res-crumb.current {
+  color: #222;
+  background: #fff;
+  border-color: #d0d0d0;
+  cursor: default;
+  font-weight: 600;
+}
+.res-crumb-sep { color: #999; }
+.res-dirs { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 14px; }
+.res-dir-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid #d6e9dc; border-radius: 8px; background: #f3faf5; color: #1c7a3e; font-size: 13px; cursor: pointer; }
+.res-dir-btn:hover { background: #e7f5ec; border-color: #06c755; }
+.res-dir-btn svg { color: #06c755; }
+.res-thumb { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; background: #f2f2f2; }
+.res-thumb-text { display: flex; align-items: center; justify-content: center; font-size: 22px; color: #06c755; }
+.res-thumb-preview { display: block; padding: 8px; font-size: 12px; line-height: 1.4; color: #444; text-align: left; overflow: hidden; white-space: pre-wrap; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; }
+.res-item-name { font-size: 13px; color: #222; word-break: break-all; }
+.res-item-meta { font-size: 11px; color: #888; }
+
+/* 點選項目後的彈出預覽 */
+.res-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.6);
+}
+.res-modal-box {
+  display: flex;
+  flex-direction: column;
+  width: min(920px, 100%);
+  max-height: 90vh;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+.res-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e6e6e6;
+}
+.res-modal-title { flex: 1; font-size: 14px; color: #06c755; word-break: break-all; }
+.res-modal-close {
+  padding: 4px 10px;
+  font-size: 16px;
+  color: #555;
+  background: #f2f2f2;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.res-modal-close:hover { background: #e6e6e6; }
+.res-modal-body { padding: 16px; overflow: auto; background: #000; }
+.res-modal-video, .res-modal-img { display: block; width: 100%; max-height: 74vh; border-radius: 8px; object-fit: contain; }
+.res-modal-img { background: #f2f2f2; }
+.res-modal-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; color: #222; background: #fff; padding: 12px; border-radius: 8px; font-family: inherit; }
+
+@media (max-width: 640px) {
+  .res-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+  .res-modal { padding: 8px; }
 }

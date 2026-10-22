@@ -98,4 +98,16 @@ export const FUNCTIONS = [
       </svg>
     ),
   },
+  {
+    id: 'resources',
+    label: '多媒體瀏覽',
+    desc: '瀏覽 Resources 目錄: 影片 / 圖片 / 提示詞',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3 5h18v14H3z" />
+        <path d="m10 9 5 3-5 3z" />
+        <path d="M3 9h18" />
+      </svg>
+    ),
+  },
 ]

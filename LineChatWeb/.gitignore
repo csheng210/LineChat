@@ -35,3 +35,5 @@ auth.json
 _shot_*.png
 _s*.png
 _d*.png
+# 簽章 secret(不入庫, 讓 token 跨重啟有效)
+auth.secret

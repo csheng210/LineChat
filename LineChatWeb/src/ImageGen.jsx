@@ -1,5 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
+import ResourcesBrowser from './ResourcesBrowser.jsx'
 import {
   DEFAULT_FORM,
   DEFAULT_VIDEO_PROMPT,
@@ -237,6 +238,8 @@ export default function ImageGen({ active }) {
       setCopied(false)
     }
   }
+
+  if (active === 'resources') return <ResourcesBrowser />
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo || isFl2v // 圖生影片/首尾圖生影片才顯示秒數

@@ -7,7 +7,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const COOKIE = 'linechat_session'
-const SESSION_TTL_MS = 1000 * 60 * 60 * 12 // 12 小時
+const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 365 // 一年
 
 // 讀帳密: 優先 auth.json, 退回環境變數 AUTH_USERS(格式 user:pass,user:pass)。
 function loadUsers(root) {
@@ -27,6 +27,26 @@ function loadUsers(root) {
     }).filter(Boolean)
   }
   return []
+}
+
+// 寫回帳密到 auth.json(更改密碼後持久化; 下次載入優先讀此檔)。
+function saveUsers(root, users) {
+  const file = path.join(root, 'auth.json')
+  fs.writeFileSync(file, JSON.stringify({ users }, null, 2) + '\n')
+}
+
+// 簽章 secret 持久化: 存於 auth.secret(已 gitignore), 讓 token 跨 server 重啟仍有效。
+function loadSecret(root) {
+  const file = path.join(root, 'auth.secret')
+  try {
+    const v = fs.readFileSync(file, 'utf8').trim()
+    if (v) return Buffer.from(v, 'hex')
+  } catch {
+    /* 檔不存在 -> 產生並寫入 */
+  }
+  const buf = crypto.randomBytes(32)
+  try { fs.writeFileSync(file, buf.toString('hex')) } catch { /* 唯讀環境退回記憶體 */ }
+  return buf
 }
 
 function sign(payload, secret) {
@@ -92,7 +112,8 @@ export function authPlugin() {
   return {
     name: 'linechat-auth',
     configureServer(server) {
-      secret = crypto.randomBytes(32)
+      const root = server.config.root
+      secret = loadSecret(root)
       users = loadUsers(server.config.root)
       if (!users.length) {
         server.config.logger.warn('[auth] 找不到帳密(auth.json 缺失且未設 AUTH_USERS), 將無法登入。請依 auth.example.json 建立 auth.json。')
@@ -100,7 +121,9 @@ export function authPlugin() {
       server.middlewares.use(async (req, res, next) => {
         const url = (req.url || '').split('?')[0]
         const cookies = readCookies(req)
-        const authedUser = parseToken(cookies[COOKIE], secret)
+        // token 來源: httpOnly cookie(瀏覽器自動帶) 或 header(localStorage token 手動帶)
+        const hdr = req.headers['x-auth-token'] || (String(req.headers.authorization || '').startsWith('Bearer ') ? req.headers.authorization.slice(7) : '')
+        const authedUser = parseToken(cookies[COOKIE], secret) || parseToken(hdr, secret)
 
         // 登入
         if (url === '/auth/login' && req.method === 'POST') {
@@ -114,7 +137,7 @@ export function authPlugin() {
             if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
               const token = makeToken(user.username, secret)
               res.setHeader('Set-Cookie', `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`)
-              return json(res, 200, { ok: true, user: user.username })
+              return json(res, 200, { ok: true, user: user.username, token })
             }
           }
           return json(res, 401, { ok: false, error: '帳號或密碼錯誤' })
@@ -124,6 +147,29 @@ export function authPlugin() {
         if (url === '/auth/logout' && req.method === 'POST') {
           res.setHeader('Set-Cookie', `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`)
           return json(res, 200, { ok: true })
+        }
+        // 更改密碼(需已登入, 僅限本人; 驗證舊密碼後寫回 auth.json)
+        if (url === '/auth/change-password' && req.method === 'POST') {
+          if (!authedUser) return json(res, 401, { ok: false, error: 'unauthorized' })
+          const body = await readBody(req)
+          let creds = {}
+          try { creds = JSON.parse(body || '{}') } catch { /* ignore */ }
+          const username = String(creds.username || '')
+          const oldPassword = String(creds.oldPassword || '')
+          const newPassword = String(creds.newPassword || '')
+          if (username !== authedUser) return json(res, 403, { ok: false, error: '僅可更改自己的密碼' })
+          if (newPassword.length < 4) return json(res, 400, { ok: false, error: '新密碼至少 4 字元' })
+          const user = users.find((u) => u.username === username)
+          if (!user) return json(res, 404, { ok: false, error: '帳號不存在' })
+          const a = Buffer.from(user.password)
+          const b = Buffer.from(oldPassword)
+          if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return json(res, 401, { ok: false, error: '舊密碼錯誤' })
+          user.password = newPassword
+          try { saveUsers(root, users) } catch { return json(res, 500, { ok: false, error: '無法寫入帳密檔' }) }
+          // 密碼已變, 重發有效 token(簽章不變, 僅刷新到期時間)
+          const token = makeToken(username, secret)
+          res.setHeader('Set-Cookie', `${COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}`)
+          return json(res, 200, { ok: true, user: username, token })
         }
 
         // 查詢授權狀態

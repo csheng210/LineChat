@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, useSyncExternalStore } from 'react'
-import { checkAuth, login, logout } from './auth.js'
+import { checkAuth, login, logout, changePassword } from './auth.js'
 import ImageGen from './ImageGen.jsx'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import { getSnapshot, hasRunningJob, subscribe } from './genStore.js'
@@ -8,6 +8,23 @@ import FlightBoard from './FlightBoard.jsx'
 import FlightPrices from './FlightPrices.jsx'
 import LiveQuery from './LiveQuery.jsx'
 import './AuthGate.css'
+
+// 頁面狀態持久化: 記錄最後瀏覽的 view/active, 重新載入或登入後先還原; 無記錄才用預設首頁。
+const VIEW_KEY = 'linechat_view_state'
+const DEFAULT_VIEW = { view: 'livequery', active: 'image1' }
+function loadView() {
+  try {
+    const raw = localStorage.getItem(VIEW_KEY)
+    if (!raw) return DEFAULT_VIEW
+    const d = JSON.parse(raw) || {}
+    return {
+      view: d.view || DEFAULT_VIEW.view,
+      active: d.active || DEFAULT_VIEW.active,
+    }
+  } catch {
+    return DEFAULT_VIEW
+  }
+}
 
 // 航班航線固定順序: 每列 [城市往澎湖, 澎湖往城市]
 const FLT_ROUTE_ORDER = [
@@ -25,8 +42,8 @@ export default function AuthGate({ children }) {
   const [state, setState] = useState('loading') // loading | unauth | auth
   const [user, setUser] = useState(null)
   const [open, setOpen] = useState(false)
-  const [view, setView] = useState('livequery') // chat | imagegen | flights | livequery(預設)
-  const [active, setActive] = useState('image1') // 生圖功能, 預設單圖編輯
+  const [view, setView] = useState(() => loadView().view) // chat | imagegen | flights | livequery(預設)
+  const [active, setActive] = useState(() => loadView().active) // 生圖功能, 預設單圖編輯
   const [routes, setRoutes] = useState([]) // 航班航線清單
   const [route, setRoute] = useState(null) // 選中航線 { dep, arr, 出發, 目的地 }
   const isMobile = () => window.matchMedia('(max-width: 860px)').matches
@@ -45,6 +62,10 @@ export default function AuthGate({ children }) {
       setState(authed ? 'auth' : 'unauth')
     })
   }, [])
+  // 記錄最後瀏覽的頁面與狀態, 供重新載入/登入後還原
+  useEffect(() => {
+    try { localStorage.setItem(VIEW_KEY, JSON.stringify({ view, active })) } catch { /* ignore */ }
+  }, [view, active])
 
   // 接收 App 回報的面板開合狀態, 讓 status bar 的「清單/分析」按鈕同步高亮
   useEffect(() => {
@@ -164,7 +185,10 @@ export default function AuthGate({ children }) {
                       : '未登入'}
                 </div>
                 {authed ? (
-                  <button className="auth-popover-btn" onClick={doLogout}>登出</button>
+                  <>
+                    <ChangePasswordPanel username={user} />
+                    <button className="auth-popover-btn" onClick={doLogout}>登出</button>
+                  </>
                 ) : (
                   <LoginPanel onSuccess={(u) => { setUser(u); setState('auth'); setOpen(false) }} />
                 )}
@@ -349,6 +373,59 @@ export default function AuthGate({ children }) {
       </div>
       </div>
     </div>
+  )
+}
+
+// popover 內的更改密碼表單(舊密碼/新密碼/確認)。
+function ChangePasswordPanel({ username }) {
+  const [oldPassword, setOldPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState('')
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [show, setShow] = useState(false)
+
+  async function submit(e) {
+    e.preventDefault()
+    if (busy) return
+    if (newPassword !== confirm) { setError('兩次新密碼不一致'); return }
+    setBusy(true)
+    setError('')
+    setMsg('')
+    const { ok, error: err } = await changePassword(username, oldPassword, newPassword)
+    setBusy(false)
+    if (ok) {
+      setMsg('密碼已更新')
+      setOldPassword(''); setNewPassword(''); setConfirm('')
+    } else {
+      setError(err || '更改失敗')
+    }
+  }
+
+  if (!show) {
+    return (
+      <button className="auth-popover-btn" onClick={() => { setShow(true); setError(''); setMsg('') }}>
+        更改密碼
+      </button>
+    )
+  }
+
+  return (
+    <form className="auth-login auth-changepw" onSubmit={submit}>
+      <div className="auth-changepw-title">更改密碼 · {username || '未知'}</div>
+      <input className="auth-input" type="password" placeholder="舊密碼" autoComplete="current-password" value={oldPassword} onChange={(e) => setOldPassword(e.target.value)} autoFocus />
+      <input className="auth-input" type="password" placeholder="新密碼(至少 4 字元)" autoComplete="new-password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} />
+      <input className="auth-input" type="password" placeholder="確認新密碼" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      {error && <div className="auth-error">{error}</div>}
+      {msg && <div className="auth-ok">{msg}</div>}
+      <div className="auth-changepw-actions">
+        <button className="auth-submit" type="submit" disabled={busy || !oldPassword || !newPassword || !confirm}>
+          {busy ? '處理中…' : '更新密碼'}
+        </button>
+        <button className="auth-cancel" type="button" onClick={() => setShow(false)}>取消</button>
+      </div>
+    </form>
   )
 }
 

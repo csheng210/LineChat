@@ -32,10 +32,11 @@ import uuid
 import urllib.parse
 import argparse
 from pathlib import Path
+from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Query
+from fastapi.responses import JSONResponse, Response, FileResponse
 from pydantic import BaseModel
 
 import cv2
@@ -138,6 +139,9 @@ def video_preview(video: UploadFile = File(..., description="輸入影片")):
 
 
 def _respond(image_bytes: bytes, out_prompt: str, as_json: Optional[bool] = False):
+    _save_resource("Image", image_bytes, ".png")
+    if out_prompt:
+        _save_resource("Prompt", out_prompt.encode("utf-8"), ".txt")
     if as_json:
         return JSONResponse({
             "image_base64": base64.b64encode(image_bytes).decode("ascii"),
@@ -149,6 +153,7 @@ def _respond(image_bytes: bytes, out_prompt: str, as_json: Optional[bool] = Fals
 
 
 def _respond_video(video_bytes: bytes, as_json: Optional[bool] = False):
+    _save_resource("Video", video_bytes, ".mp4")
     if as_json:
         return JSONResponse({"video_base64": base64.b64encode(video_bytes).decode("ascii")})
     return Response(content=video_bytes, media_type="video/mp4")
@@ -157,6 +162,87 @@ def _respond_video(video_bytes: bytes, as_json: Optional[bool] = False):
 @app.get("/health")
 def health():
     return {"status": "ok", "comfyui_base_url": core.HTTP_BASE}
+
+
+# ---- 多媒體瀏覽(Resources): 瀏覽 LineChatWeb/Resources 下的 Video/Image/Prompt ----
+RESOURCES_ROOT = Path(__file__).resolve().parent.parent / "LineChatWeb" / "Resources"
+RESOURCES_DIRS = {"Video", "Image", "Prompt"}
+
+
+def _save_resource(kind: str, data: bytes, ext: str) -> Optional[str]:
+    """把生成結果存到 LineChatWeb/Resources/<kind>/output/。失敗回 None, 不影響主流程。"""
+    try:
+        if kind not in RESOURCES_DIRS:
+            return None
+        out_dir = RESOURCES_ROOT / kind / "output"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}{ext}"
+        (out_dir / name).write_bytes(data)
+        return str(out_dir / name)
+    except Exception:
+        return None
+_MEDIA_TYPES = {
+    ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime", ".mkv": "video/x-matroska",
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
+    ".gif": "image/gif", ".bmp": "image/bmp",
+    ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json",
+}
+_KIND_BY_EXT = {}
+for _e in (".mp4", ".webm", ".mov", ".mkv"):
+    _KIND_BY_EXT[_e] = "video"
+for _e in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
+    _KIND_BY_EXT[_e] = "image"
+for _e in (".txt", ".md", ".json"):
+    _KIND_BY_EXT[_e] = "prompt"
+
+
+def _resources_dir_path(dir_name: str, sub: str = "") -> Path:
+    if dir_name not in RESOURCES_DIRS:
+        raise HTTPException(status_code=400, detail="dir 需為 Video/Image/Prompt")
+    base = RESOURCES_ROOT / dir_name
+    rel = Path(sub) if sub else Path(".")
+    if rel.is_absolute() or ".." in rel.parts:
+        raise HTTPException(status_code=400, detail="非法路徑")
+    d = (base / rel).resolve()
+    if not d.is_relative_to(base.resolve()):
+        raise HTTPException(status_code=400, detail="非法路徑")
+    if not d.is_dir():
+        raise HTTPException(status_code=404, detail="目錄不存在")
+    return d
+
+
+@app.get("/resources/list")
+def resources_list(dir: str = Query(...), sub: str = Query("")):
+    base = _resources_dir_path(dir, sub)
+    dirs, files = [], []
+    for f in base.iterdir():
+        if f.is_dir():
+            dirs.append({"type": "dir", "name": f.name})
+        elif f.is_file():
+            ext = f.suffix.lower()
+            files.append({
+                "type": "file", "name": f.name,
+                "kind": _KIND_BY_EXT.get(ext, "other"),
+                "size": f.stat().st_size,
+                "mtime": int(f.stat().st_mtime),
+            })
+    dirs.sort(key=lambda x: x["name"].lower())
+    files.sort(key=lambda x: x["mtime"], reverse=True)
+    path = dir if not sub else f"{dir}/{sub}"
+    return {"dir": dir, "sub": sub, "path": path, "items": dirs + files}
+
+
+@app.get("/resources/file")
+def resources_file(dir: str = Query(...), name: str = Query(...), sub: str = Query("")):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name  # 剝掉任何路徑成分, 防目錄穿越
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    target = base / safe
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    media = _MEDIA_TYPES.get(target.suffix.lower(), "application/octet-stream")
+    return FileResponse(str(target), media_type=media, filename=safe)
 
 
 @app.post("/text2img")
@@ -287,7 +373,7 @@ def ref2video(
         raise HTTPException(status_code=400, detail="image/video 不可為空")
     p_img = _temp_upload(d_img, image.filename, ".png")
     p_vid = _temp_upload(d_vid, video.filename, ".mp4")
-    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if d_aud else None
+    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if audio and d_aud else None
     try:
         video_bytes = run_ref2video.generate(
             image_path=p_img, video_path=p_vid, audio_path=p_aud, duration=duration,
@@ -397,6 +483,8 @@ def video2prompt(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.remove(path)
+    if prompt:
+        _save_resource("Prompt", prompt.encode("utf-8"), ".txt")
     return JSONResponse({"video": video.filename, "target": target, "prompt": prompt})
 
 
@@ -425,6 +513,8 @@ def image2prompt(
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         os.remove(path)
+    if prompt:
+        _save_resource("Prompt", prompt.encode("utf-8"), ".txt")
     return JSONResponse({"image": image.filename, "target": target, "prompt": prompt})
 
 
@@ -477,6 +567,9 @@ def _start_job(job_id, runner):
                     j["progress"] = 1.0
                     j["image_base64"] = base64.b64encode(image_bytes).decode("ascii")
                     j["prompt"] = out_prompt or ""
+            _save_resource("Image", image_bytes, ".png")
+            if out_prompt:
+                _save_resource("Prompt", out_prompt.encode("utf-8"), ".txt")
         except core.CancelledError:
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
@@ -604,6 +697,7 @@ def _start_video_job(job_id, runner):
                     j["status"] = "done"
                     j["progress"] = 1.0
                     j["video_base64"] = base64.b64encode(video_bytes).decode("ascii")
+            _save_resource("Video", video_bytes, ".mp4")
         except core.CancelledError:
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
@@ -692,7 +786,7 @@ def job_ref2video(
         raise HTTPException(status_code=400, detail="image/video 不可為空")
     p_img = _temp_upload(d_img, image.filename, ".png")
     p_vid = _temp_upload(d_vid, video.filename, ".mp4")
-    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if d_aud else None
+    p_aud = _temp_upload(d_aud, audio.filename, ".mp3") if audio and d_aud else None
     job_id = _new_job()
 
     def runner(cb, cancel_event, prompt_id_cb):
@@ -810,6 +904,8 @@ def _start_prompt_job(job_id, runner):
                     j["status"] = "done"
                     j["progress"] = 1.0
                     j["prompt"] = prompt or ""
+            if prompt:
+                _save_resource("Prompt", prompt.encode("utf-8"), ".txt")
         except core.CancelledError:
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
