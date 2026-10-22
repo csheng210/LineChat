@@ -8,6 +8,12 @@
       "extraPaths": ["ComfyAPI/.venv/Lib/site-packages"]
     },
     {
+      "root": "LineChatAPI",
+      "venvPath": "LineChatAPI",
+      "venv": ".venv",
+      "extraPaths": ["LineChatAPI/.venv/Lib/site-packages"]
+    },
+    {
       "root": "LineChatActions",
       "venvPath": "LineChatActions",
       "venv": ".venv",
