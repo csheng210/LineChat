@@ -24,22 +24,15 @@
       "title": "載入圖片"
     }
   },
-  "115": {
-    "inputs": {
-      "aspect_ratio": "16:9 (Widescreen)",
-      "megapixels": 0.4,
-      "multiple": 32
-    },
-    "class_type": "ResolutionSelector",
-    "_meta": {
-      "title": "解析度選擇器"
-    }
-  },
   "119": {
     "inputs": {
       "upscale_method": "nearest-exact",
       "megapixels": 1,
-      "resolution_steps": 32
+      "resolution_steps": 32,
+      "image": [
+        "114",
+        0
+      ]
     },
     "class_type": "ImageScaleToTotalPixels",
     "_meta": {
@@ -199,7 +192,7 @@
   },
   "105:15": {
     "inputs": {
-      "noise_seed": 1043679965674068
+      "noise_seed": 463808061888991
     },
     "class_type": "RandomNoise",
     "_meta": {
@@ -230,11 +223,11 @@
     "inputs": {
       "prompt": "片長總長度15秒\n黄昏的咖啡馆靠窗位置，窗外下着小雨。一位穿米色针织衫的女性\n正低头搅拌咖啡，镜头从她的手部特写缓慢上摇至面部，她抬头看\n向窗外，嘴角微微上扬。暖色调室内灯光，窗外冷色调环境光形成\n对比。背景音：雨声、咖啡杯轻碰声、隐约的爵士乐。\n真實的人類表情和互動。輕微的運動模糊、自然曝光變化、真實的鏡頭自動對焦調整。沒有商業廣告風格。沒有戲劇化的擺姿勢。沒有完美的電影構圖。沒有文字疊加。沒有標誌。沒有面部變化。沒有身份變化。沒有人工轉場。沒有CGI感覺。全程保持穩定的角色一致性。",
       "width": [
-        "115",
+        "120",
         0
       ],
       "height": [
-        "115",
+        "120",
         1
       ],
       "length": [
