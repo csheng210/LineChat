@@ -28,6 +28,12 @@ npm start        # 或 npm run dev (含 --watch)
 - `POST /send`    body `{ "account", "person", "message" }` 真正送出一則 LINE 訊息。
   回傳 `{ ok, error? }`。串行執行, 忙線佇列已滿回 `429`。
 
+- `POST /send-app` 用 Windows 桌面 LINE App 送訊(spawn `src/py/send_line_app_message.py`, pywinauto/UIA, 不驱动 Chrome)。
+  body `{ "person", "message", "dryRun"? }`: 搜尋好友 `person` -> 點選第一筆 -> 輸入 `message` -> Enter 送出; `dryRun:true` 只輸入不送出(先驗證)。
+  送出後自動截圖送 vLLM 解析(讀取對話中我方最後訊息, 與目標訊息比對), 回傳 `{ ok, sent, status, dryRun, verify, log }`: `verify` 為 `{ verified, matched, last_outgoing, expected, reason, screenshot }`。走同一串行佇列, 與瀏覽器送訊/同步互斥(共用剪貼簿與桌面 GUI); 佇列已滿回 `429`, 逾時回 `504`。已送出但驗證未確認回 `206`。
+  vLLM 設定讀 `.env` 的 `VLLM_BASE_URL`/`VLLM_MODEL`/`VLLM_API_KEY`(可用 `--base-url`/`--model`/`--api-key` 覆寫); 跳過驗證加 `--no-verify`。
+  需 pywinauto, 用本專案 `.venv` 的 python(可用 `ACTIONS_APP_PYTHON` 覆寫); 截圖產物 `send_*.png`/`dryrun_*.png` 落在 `src/py` 且已被 gitignore。
+
 - `POST /analyze` 分析聊天紀錄(spawn `src/py/chat_vllm_anlaysis.py` 問 vLLM, 不驱动 Chrome)。
   body `{ "chatFile", "startIndex"?, "endIndex"?, "classification"? }`: `chatFile` 為 `chat_history` 下的檔名(可省略 .json),
   給 `startIndex/endIndex`(0 起, 含兩端)時只分析該段紀錄。回傳 `{ ok, result }`,

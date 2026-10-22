@@ -116,6 +116,52 @@ app.post('/send', async (req, reply) => {
   }
 });
 
+// ---- 傳送 LINE 桌面 App 訊息: POST /send-app (spawn src/py/send_line_app_message.py, pywinauto/UIA) ----
+//   與 /send(瀏覽器) 不同: 本端點驅動 Windows 桌面 LINE App(搜尋好友 -> 輸入 -> Enter 送出)。
+//   走同一串行佇列, 確保與瀏覽器送訊/同步互斥(共用剪貼簿與桌面 GUI, 不可並行)。
+//   入參: person(好友名稱), message(訊息), 選填 dryRun(true=只輸入不送出)。
+app.post('/send-app', async (req, reply) => {
+  const b = req.body || {};
+  const person = (b.person || '').toString();
+  const message = (b.message || '').toString();
+  const dryRun = !!b.dryRun;
+  if (!person || !message.trim()) {
+    return reply.code(400).send({ ok: false, error: '好友名稱 / 訊息內容皆不可為空' });
+  }
+  const script = CONFIG.PY_SEND_APP;
+  if (!fs.existsSync(script)) return reply.code(500).send({ ok: false, error: 'App 送訊腳本不存在: ' + script });
+  if (!fs.existsSync(CONFIG.APP_PYTHON_BIN)) return reply.code(500).send({ ok: false, error: '找不到 App 送訊用的 Python(需含 pywinauto): ' + CONFIG.APP_PYTHON_BIN });
+  if (waiters.length >= CONFIG.MAX_QUEUE) return reply.code(429).send({ ok: false, error: '佇列已滿, 請稍後再試' });
+
+  const pyArgs = [script, person, message];
+  if (dryRun) pyArgs.push('--dry-run');
+  console.log(`[send-app] 排程: 好友=「${person}」 字數=${message.length}${dryRun ? ' (dry-run)' : ''}`);
+  try {
+    const outcome = await enqueue(() =>
+      runPython(CONFIG.APP_PYTHON_BIN, pyArgs, { cwd: CONFIG.APP_PY_DIR, timeoutMs: CONFIG.APP_SEND_TIMEOUT_MS }),
+    );
+    const lines = String((outcome.stdout || '') + (outcome.stderr || '')).split(/\r?\n/).filter(Boolean);
+    const tail = lines.slice(-8).join('\n');
+    if (outcome.spawnError) {
+      return reply.code(500).send({ ok: false, error: '啟動 App 送訊程式失敗: ' + ((outcome.spawnError && outcome.spawnError.message) || outcome.spawnError) });
+    }
+    if (outcome.timedOut) {
+      return reply.code(504).send({ ok: false, error: 'App 送訊逾時（超過 ' + Math.round(CONFIG.APP_SEND_TIMEOUT_MS / 1000) + ' 秒，已中斷）', log: tail });
+    }
+    // 解析腳本末行 VERIFY_JSON: 取得截圖驗證結果(模型讀取我方最後訊息, 與目標訊息比對)。
+    let verify = null;
+    const vline = lines.find((l) => l.startsWith('VERIFY_JSON:'));
+    if (vline) { try { verify = JSON.parse(vline.slice('VERIFY_JSON:'.length)); } catch { verify = null; } }
+    const sent = outcome.status === 0;
+    const ok = sent && (verify == null || verify.skipped === true || verify.matched === true);
+    const code = ok ? 200 : (sent ? 206 : 502); // 206: 已送出但驗證未確認成功
+    return reply.code(code).send({ ok, sent, status: outcome.status, dryRun, verify, log: tail });
+  } catch (err) {
+    const msg = err && err.message ? err.message : String(err);
+    if (msg === 'queue-full') return reply.code(429).send({ ok: false, error: '佇列已滿, 請稍後再試' });
+    return reply.code(500).send({ ok: false, error: msg });
+  }
+});
 // 共用: 使用者傳入的擷取索引(空值 -> null, 非整數 -> NaN 交由端點擋下)
 function toIndex(v) {
   return v === undefined || v === null || v === '' ? null : Number.parseInt(v, 10);

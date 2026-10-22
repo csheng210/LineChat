@@ -8,3 +8,8 @@ node_modules/
 .venv/
 __pycache__/
 *.pyc
+
+# ---- App 送訊截圖產物(send_line_app_message.py 輸出) ----
+send_*.png
+dryrun_*.png
+

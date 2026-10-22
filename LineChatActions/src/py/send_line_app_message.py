@@ -6,6 +6,7 @@
     1. 偵測/啟動 LINE App 並連線主視窗
     2. 搜尋好友 -> 點選第一筆真正結果, 開啟對話
     3. 定位訊息輸入框 (開對話後最下方的 Edit) -> 清空 -> 貼上訊息 -> Enter 送出
+    4. 截圖送 vLLM 解析 -> 取我方最後訊息與目標訊息比對, 確認是否真的送出 (末行輸出 VERIFY_JSON)
 
 用法:
     python send_line_app_message.py "筆記" "Hello"
@@ -19,7 +20,11 @@ LINE 主視窗為 CEF(Chromium) 架構, 一律以 backend="uia" 連線。
 from __future__ import annotations
 
 import argparse
+import base64
 import io
+import json
+import urllib.error
+import urllib.request
 import os
 import subprocess
 import sys
@@ -40,15 +45,19 @@ LINE_TITLE = "LINE"
 
 # --- 載入同目錄 .env (選填: LINE_APP_PATH 等) ---
 def load_env() -> None:
-    env_path = Path(__file__).with_name(".env")
-    if not env_path.exists():
-        return
-    for raw in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
+    # 依序載入: 同目錄 .env -> 上層 LineChatActions/.env (vLLM 設定在那裡)。
+    # 已存在的環境變數不被覆蓋(真實環境優先)。
+    here = Path(__file__).with_name(".env")
+    parent = Path(__file__).resolve().parents[2] / ".env"  # src/py -> LineChatActions/.env
+    for env_path in (here, parent):
+        if not env_path.exists():
             continue
-        key, val = line.split("=", 1)
-        os.environ.setdefault(key.strip(), val.strip())
+        for raw in env_path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            os.environ.setdefault(key.strip(), val.strip())
 
 
 # --- 解析 LINE 執行檔路徑: .env > 內建預設 > 開始選單捷徑 ---
@@ -219,6 +228,84 @@ def capture(win, out_path: Path) -> None:
         print(f"[截圖] 失敗: {exc}")
 
 
+# --- vLLM 驗證: 讀截圖 -> 取我方最後訊息 -> 比對目標訊息, 確認是否真的送出 ---
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://llmhost:8189/v1")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "swift-1.5-iq3_xxs")
+VLLM_API_KEY = os.environ.get("VLLM_API_KEY", "EMPTY")
+
+VERIFY_PROMPT = (
+    "這是一張 Windows 版 LINE 桌面 App 的對話視窗截圖。"
+    "請讀取對話訊息, 找出『我方(自己, 通常顯示在右側)』最後傳出的那則訊息文字。"
+    '嚴格以 JSON 輸出, 不要多餘文字, 格式: '
+    '{"last_outgoing": "我方最後傳出的訊息原文", "matched": true, "reason": "簡短說明"}'
+)
+
+
+def _image_data_url(path: Path) -> str:
+    data = path.read_bytes()
+    mime = "image/jpeg" if data[:3] == b"\xff\xd8\xff" else "image/png"
+    return f"data:{mime};base64," + base64.b64encode(data).decode("ascii")
+
+
+def _call_vllm_image(data_url, prompt, base_url, model, api_key, timeout, max_tokens=512, temperature=0.0):
+    payload = {
+        "model": model,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": data_url}},
+            ],
+        }],
+    }
+    endpoint = base_url.rstrip("/") + "/chat/completions"
+    headers = {"Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = "Bearer " + api_key
+    req = urllib.request.Request(endpoint, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        result = json.load(resp)
+    try:
+        text = (result["choices"][0]["message"]["content"] or "").strip()
+    except (KeyError, IndexError):
+        raise RuntimeError("vLLM 回應格式不預期: " + json.dumps(result, ensure_ascii=False)[:300])
+    return text
+
+
+def _extract_json(text: str):
+    # 模型偶爾包 ```json 前後綴: 抓第一個 { 到最後一個 }。
+    s, e = text.find("{"), text.rfind("}")
+    if s == -1 or e == -1:
+        return None
+    try:
+        return json.loads(text[s:e + 1])
+    except json.JSONDecodeError:
+        return None
+
+
+def verify_sent(screenshot: Path, expected: str, base_url, model, api_key, timeout):
+    """讀截圖 -> 取我方最後訊息 -> 與 expected 比對。回傳 dict。"""
+    try:
+        data_url = _image_data_url(screenshot)
+        raw = _call_vllm_image(data_url, VERIFY_PROMPT, base_url, model, api_key, timeout)
+    except (urllib.error.URLError, urllib.error.HTTPError, RuntimeError, OSError) as exc:
+        return {"verified": False, "matched": False, "error": f"呼叫 vLLM 失敗: {exc}"}
+    parsed = _extract_json(raw)
+    if not parsed:
+        return {"verified": False, "matched": False, "error": "模型未回傳可解析的 JSON", "raw": raw[:300]}
+    last = (parsed.get("last_outgoing") or "").strip()
+    exp = expected.strip()
+    matched = bool(exp) and (exp in last or last in exp)
+    return {
+        "verified": True,
+        "matched": matched,
+        "last_outgoing": last,
+        "expected": exp,
+        "reason": (parsed.get("reason") or "").strip(),
+    }
+
 def main() -> int:
     load_env()
     parser = argparse.ArgumentParser(description="傳送訊息給 LINE 好友")
@@ -229,6 +316,11 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=float(os.environ.get("LINE_WINDOW_TIMEOUT", 30)), help="連線/啟動等待秒數")
     parser.add_argument("--search-wait", type=float, default=2.0, help="輸入名稱後等待過濾的秒數")
     parser.add_argument("--out", default="", help="截圖輸出路徑 (預設 send_<時間>.png)")
+    parser.add_argument("--no-verify", action="store_true", help="送出後不做 vLLM 截圖驗證")
+    parser.add_argument("--base-url", default=VLLM_BASE_URL, help="vLLM API 位置 (預設讀 .env 的 VLLM_BASE_URL)")
+    parser.add_argument("--model", default=VLLM_MODEL, help="模型名稱 (預設讀 .env 的 VLLM_MODEL)")
+    parser.add_argument("--api-key", default=VLLM_API_KEY, help="vLLM API Key (預設讀 .env 的 VLLM_API_KEY)")
+    parser.add_argument("--verify-timeout", type=float, default=60.0, help="驗證呼叫 vLLM 逾時秒數")
     args = parser.parse_args()
 
     if args.no_launch and not line_running():
@@ -259,7 +351,16 @@ def main() -> int:
     out = Path(args.out) if args.out else Path(f"send_{datetime.now():%Y%m%d_%H%M%S}.png")
     capture(win, out)
     print("\n[完成] 已傳送訊息給好友。")
-    return 0
+
+    # --- 驗證: 截圖送 vLLM 解析, 取我方最後訊息與目標訊息比對, 確認是否真的送出 ---
+    verify = {"verified": False, "matched": False, "skipped": True, "reason": "已跳過驗證 (--no-verify)"}
+    if not args.no_verify:
+        print("[驗證] 截圖送模型解析中 ...")
+        verify = verify_sent(out, args.message, args.base_url, args.model, args.api_key, args.verify_timeout)
+        verify["screenshot"] = str(out)
+        print(f"[驗證] matched={verify.get('matched')} 我方最後訊息={verify.get('last_outgoing', '')!r}")
+    print("VERIFY_JSON:" + json.dumps(verify, ensure_ascii=False))
+    return 0 if (args.no_verify or verify.get("matched")) else 6
 
 
 if __name__ == "__main__":

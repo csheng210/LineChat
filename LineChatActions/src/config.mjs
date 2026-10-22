@@ -75,6 +75,11 @@ export const CONFIG = {
   RAG_DIR: process.env.ACTIONS_RAG_DIR || path.join(__dirname, '..', 'question_class_rag'),
   // 呼叫 agent service(如 room_agent 走 LLM tool-calling)的逾時秒數。
   AGENT_TIMEOUT: process.env.ACTIONS_AGENT_TIMEOUT || '150',
+  // LINE 桌面 App 送訊(send_line_app_message.py, pywinauto/UIA): 需 pywinauto, 用本專案 .venv 的 python。
+  PY_SEND_APP: path.join(__dirname, 'py', 'send_line_app_message.py'),
+  APP_PY_DIR: path.join(__dirname, 'py'),
+  APP_PYTHON_BIN: process.env.ACTIONS_APP_PYTHON || path.join(__dirname, '..', '.venv', 'Scripts', 'python.exe'),
+  APP_SEND_TIMEOUT_MS: int(process.env.ACTIONS_APP_SEND_TIMEOUT_MS, 120000),
   // vLLM 語意辨識服務位置(獨立設定, 未來可能更動; 可用 env VLLM_BASE_URL 覆蓋)。
   VLLM_BASE_URL: process.env.VLLM_BASE_URL || 'http://llmhost:8189/v1',
 
