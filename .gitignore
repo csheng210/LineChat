@@ -38,3 +38,6 @@ FlyTicket/Mandarin/tickets/
 # ---- ComfyAPI 輸入圖片(執行期使用, 不入库) ----
 ComfyAPI/input/
 *.log.err
+
+# ---- ComfyUI 產生/使用的資源檔(執行期, 不入库) ----
+LineChatWeb/Resources/
