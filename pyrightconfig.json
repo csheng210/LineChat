@@ -1,13 +1,17 @@
 {
-  "extraPaths": [
-    "LineChatActions/src/py",
-    "LineChatEventHandle"
-  ],
+  "extraPaths": ["LineChatActions/src/py", "LineChatEventHandle"],
   "executionEnvironments": [
     {
       "root": "ComfyAPI",
       "venvPath": "ComfyAPI",
-      "venv": ".venv"
+      "venv": ".venv",
+      "extraPaths": ["ComfyAPI/.venv/Lib/site-packages"]
+    },
+    {
+      "root": "LineChatActions",
+      "venvPath": "LineChatActions",
+      "venv": ".venv",
+      "extraPaths": ["LineChatActions/.venv/Lib/site-packages"]
     }
   ]
 }

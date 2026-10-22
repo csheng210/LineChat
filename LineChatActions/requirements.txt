@@ -1,0 +1,8 @@
+# LineChatActions/src/py 的 Python 依賴 (pywinauto 操作 LINE App)
+# 建環境: python -m venv .venv ; .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+# 裝完 pywin32 請跑: .\.venv\Scripts\python.exe .\.venv\Scripts\pywin32_postinstall.py -install
+pywinauto==0.6.9
+pywin32==312
+comtypes==1.4.17
+six==1.17.0
+pillow==13.0.0
