@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import ResourcesBrowser from './ResourcesBrowser.jsx'
+import ResourcesPicker from './ResourcesPicker.jsx'
 import {
   DEFAULT_FORM,
   DEFAULT_VIDEO_PROMPT,
@@ -99,6 +100,7 @@ export default function ImageGen({ active }) {
   const isFl2v = active === 'images2video'
   const [copied, setCopied] = useState(false)
   const [videoUrl, setVideoUrl] = useState('') // 反推提示詞選影片: 內嵌播放器用的來源 URL
+  const [picker, setPicker] = useState(null) // { dir, kind, slot } 伺服器 Resources 選取彈窗
 
   // 選到影片時產生可播放來源(object URL), 換檔/卸載時釋放, 讓預覽用播放器而非縮圖
   useEffect(() => {
@@ -266,6 +268,12 @@ export default function ImageGen({ active }) {
                   accept={isReverse ? 'image/*,video/*' : 'image/*'}
                   onChange={(e) => onPickImage(1, e.target.files[0])}
                 />
+                <span className="gen-server-btns">
+                  <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Image', kind: 'image', slot: 1 }) }}>從伺服器選圖</button>
+                  {isReverse && (
+                    <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Video', kind: 'video', slot: 1 }) }}>從伺服器選影片</button>
+                  )}
+                </span>
                 {preview1 ? (
                   isReverse && videoUrl ? (
                     <video
@@ -292,6 +300,7 @@ export default function ImageGen({ active }) {
                     accept="image/*"
                     onChange={(e) => onPickImage(2, e.target.files[0])}
                   />
+                  <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Image', kind: 'image', slot: 2 }) }}>從伺服器選圖</button>
                   {preview2 ? (
                     <img className="gen-thumb" src={preview2} alt="圖二預覽" />
                   ) : (
@@ -333,6 +342,7 @@ export default function ImageGen({ active }) {
                 value={prompt}
                 onChange={(e) => setForm(active, { prompt: e.target.value })}
               />
+              <button type="button" className="gen-server-btn" onClick={() => setPicker({ dir: 'Prompt', kind: 'prompt' })}>從 Prompt 目錄挑選</button>
             </label>
           )}
 
@@ -463,6 +473,16 @@ export default function ImageGen({ active }) {
           )}
         </div>
       </section>
+
+      {picker && (
+        <ResourcesPicker
+          dir={picker.dir}
+          kind={picker.kind}
+          onClose={() => setPicker(null)}
+          onPickFile={(file) => { onPickImage(picker.slot, file); setPicker(null) }}
+          onPickText={(text) => { setForm(active, { prompt: text }); setPicker(null) }}
+        />
+      )}
     </div>
   )
 }

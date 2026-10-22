@@ -245,6 +245,51 @@ def resources_file(dir: str = Query(...), name: str = Query(...), sub: str = Que
     return FileResponse(str(target), media_type=media, filename=safe)
 
 
+_KIND_DIR = {"Video": "video", "Image": "image", "Prompt": "prompt"}
+
+@app.post("/resources/upload")
+async def resources_upload(dir: str = Form(...), sub: str = Form(""), files: list[UploadFile] = File(...)):
+    base = _resources_dir_path(dir, sub)
+    kind = _KIND_DIR.get(dir)
+    saved = []
+    for f in files:
+        safe = Path(f.filename or "").name
+        if not safe or safe != f.filename:
+            raise HTTPException(status_code=400, detail="非法檔名")
+        ext = Path(safe).suffix.lower()
+        if _KIND_BY_EXT.get(ext) != kind:
+            raise HTTPException(status_code=400, detail=f"{dir} 目錄僅接受 {kind} 檔案")
+        target = base / safe
+        target.write_bytes(await f.read())
+        saved.append(safe)
+    return {"ok": True, "saved": saved}
+
+@app.post("/resources/delete")
+def resources_delete(dir: str = Form(...), sub: str = Form(""), name: str = Form(...)):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    target = base / safe
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    target.unlink()
+    return {"ok": True, "name": safe}
+
+@app.post("/resources/prompt")
+def resources_prompt(dir: str = Form("Prompt"), sub: str = Form(""), name: str = Form(...), content: str = Form("")):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe:
+        raise HTTPException(status_code=400, detail="請輸入檔名")
+    if not safe.lower().endswith((".txt", ".md")):
+        safe = safe + ".txt"
+    target = base / safe
+    if target.exists():
+        raise HTTPException(status_code=409, detail="檔名已存在")
+    target.write_text(content, encoding="utf-8")
+    return {"ok": True, "name": safe}
+
 @app.post("/text2img")
 def text2img(req: Text2ImgRequest):
     try:

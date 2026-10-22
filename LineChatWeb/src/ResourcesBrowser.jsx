@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 // 多媒體瀏覽: 瀏覽 ComfyAPI 後端的 Resources 目錄(Video/Image/Prompt)。
 //   經 Vite proxy /comfy/* -> ComfyAPI。清單走 GET /comfy/resources/list?dir=&sub=, 檔案走 /comfy/resources/file?dir=&sub=&name=。
@@ -37,6 +37,11 @@ export default function ResourcesBrowser() {
   const [error, setError] = useState('')
   const [text, setText] = useState('')
   const [meta, setMeta] = useState({})
+  const [nonce, setNonce] = useState(0)
+  const [promptOpen, setPromptOpen] = useState(false)
+  const [pName, setPName] = useState('')
+  const [pContent, setPContent] = useState('')
+  const fileRef = useRef(null)
 
   useEffect(() => {
     let cancelled = false
@@ -62,7 +67,7 @@ export default function ResourcesBrowser() {
       .catch(() => { if (!cancelled) { setItems([]); setError('無法載入目錄清單') } })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [dir, sub])
+  }, [dir, sub, nonce])
 
   function open(f) {
     setSel(f)
@@ -77,6 +82,64 @@ export default function ResourcesBrowser() {
 
   function enterDir(name) {
     setSub(sub ? sub + '/' + name : name)
+  }
+
+  function refresh() {
+    setNonce((n) => n + 1)
+  }
+
+  async function uploadFiles(fileList) {
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    for (const f of fileList) fd.append('files', f)
+    const r = await fetch('/comfy/resources/upload', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('上傳失敗: ' + (d.detail || r.status))
+      return
+    }
+    refresh()
+  }
+
+  function onPickFiles(e) {
+    const files = e.target.files
+    if (files && files.length) uploadFiles(files)
+    e.target.value = ''
+  }
+
+  async function delFile(it) {
+    if (!window.confirm('確定刪除「' + it.name + '」?')) return
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', it.name)
+    const r = await fetch('/comfy/resources/delete', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('刪除失敗: ' + (d.detail || r.status))
+      return
+    }
+    refresh()
+  }
+
+  async function createPrompt() {
+    if (!pName.trim()) { setError('請輸入檔名'); return }
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', pName.trim())
+    fd.append('content', pContent)
+    const r = await fetch('/comfy/resources/prompt', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('新增失敗: ' + (d.detail || r.status))
+      return
+    }
+    setPromptOpen(false)
+    setPName('')
+    setPContent('')
+    refresh()
   }
 
   // 麵包屑: path 形如 'Video' 或 'Video/output/sub'
@@ -95,34 +158,54 @@ export default function ResourcesBrowser() {
           {TABS.map((t, i) => (
             <Fragment key={t.id}>
               {i > 0 && <span className="res-tab-sep" aria-hidden="true" />}
-              {dir === t.id && sub ? (
+              {dir === t.id ? (
                 <span className="res-tab-group">
                   <button className="res-tab active" onClick={() => { setDir(t.id); setSub('') }}>
                     {t.label}
                   </button>
-                  {sub.split('/').map((seg, j, arr) => (
-                    <Fragment key={'s:' + j}>
-                      <span className="res-tab-slash">/</span>
-                      <button
-                        className={'res-tab res-tab-sub' + (j === arr.length - 1 ? ' active' : '')}
-                        onClick={() => setSub(sub.split('/').slice(0, j + 1).join('/'))}
-                      >
-                        {seg}
-                      </button>
-                    </Fragment>
-                  ))}
+                  {sub &&
+                    sub.split('/').map((seg, j, arr) => (
+                      <Fragment key={'s:' + j}>
+                        <span className="res-tab-slash">/</span>
+                        <button
+                          className={'res-tab res-tab-sub' + (j === arr.length - 1 ? ' active' : '')}
+                          onClick={() => setSub(sub.split('/').slice(0, j + 1).join('/'))}
+                        >
+                          {seg}
+                        </button>
+                      </Fragment>
+                    ))}
+                  <button
+                    className="res-tab-add"
+                    title={dir === 'Prompt' ? '新增提示詞' : '上傳' + (dir === 'Video' ? '影片' : '圖片')}
+                    aria-label="新增"
+                    onClick={() => {
+                      if (dir === 'Prompt') { setPromptOpen(true); setError('') }
+                      else if (fileRef.current) fileRef.current.click()
+                    }}
+                  >
+                    ＋
+                  </button>
                 </span>
               ) : (
-                <button
-                  className={'res-tab' + (dir === t.id ? ' active' : '')}
-                  onClick={() => { setDir(t.id); setSub('') }}
-                >
+                <button className="res-tab" onClick={() => { setDir(t.id); setSub('') }}>
                   {t.label}
                 </button>
               )}
             </Fragment>
           ))}
         </div>
+
+        {(dir === 'Video' || dir === 'Image') && (
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept={dir === 'Video' ? 'video/*' : 'image/*'}
+            style={{ display: 'none' }}
+            onChange={onPickFiles}
+          />
+        )}
 
         {dirs.length > 0 && (
           <div className="res-dirs">
@@ -145,7 +228,8 @@ export default function ResourcesBrowser() {
             const m = meta[it.name] || {}
             const dim = m.w && m.h ? m.w + '×' + m.h : ''
             return (
-              <button key={'f:' + it.name} className="res-card" onClick={() => open(it)}>
+              <div key={'f:' + it.name} className="res-card" role="button" tabIndex={0} onClick={() => open(it)}>
+                <button className="res-card-del" title="刪除" aria-label="刪除" onClick={(e) => { e.stopPropagation(); delFile(it) }}>✕</button>
                 {it.kind === 'image' ? (
                   <img className="res-thumb" src={fileUrl(dir, sub, it.name)} alt={it.name} loading="lazy"
                     onLoad={(e) => { const el = e.currentTarget; const w = el.naturalWidth, h = el.naturalHeight; setMeta((prev) => ({ ...prev, [it.name]: { w, h } })) }} />
@@ -157,7 +241,7 @@ export default function ResourcesBrowser() {
                 )}
                 <span className="res-item-name">{it.name}</span>
                 <span className="res-item-meta">{[dim, fmtSize(it.size), fmtTime(it.mtime)].filter(Boolean).join(' · ')}</span>
-              </button>
+              </div>
             )
           })}
         </div>
@@ -183,6 +267,43 @@ export default function ResourcesBrowser() {
               {sel.kind === 'other' && (
                 <p className="gen-hint">此檔案類型無法預覽：{sel.name}</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {promptOpen && (
+        <div className="res-modal" onClick={() => setPromptOpen(false)} role="dialog" aria-modal="true">
+          <div className="res-modal-box res-prompt-box" onClick={(e) => e.stopPropagation()}>
+            <div className="res-modal-head">
+              <span className="res-modal-title">新增提示詞</span>
+              <button className="res-modal-close" onClick={() => setPromptOpen(false)} aria-label="關閉">✕</button>
+            </div>
+            <div className="res-prompt-form">
+              <label className="res-prompt-label">
+                檔名
+                <input
+                  className="res-prompt-input"
+                  value={pName}
+                  onChange={(e) => setPName(e.target.value)}
+                  placeholder="例如 my_prompt (.txt 可省略)"
+                  autoFocus
+                />
+              </label>
+              <label className="res-prompt-label">
+                內容
+                <textarea
+                  className="res-prompt-textarea"
+                  value={pContent}
+                  onChange={(e) => setPContent(e.target.value)}
+                  rows={8}
+                  placeholder="輸入提示詞內容"
+                />
+              </label>
+              <div className="res-prompt-actions">
+                <button className="res-tool-btn" onClick={() => setPromptOpen(false)}>取消</button>
+                <button className="res-tool-btn primary" onClick={createPrompt}>建立</button>
+              </div>
             </div>
           </div>
         </div>
