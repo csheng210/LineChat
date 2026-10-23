@@ -181,7 +181,7 @@ class ReversePrompt:
 
     def generate(self, image, base_url, model, api_key, target, max_frames, max_side,
                  jpeg_quality, temperature, max_tokens, timeout, retries, extra):
-        import torch  # ComfyUI ships torch; import locally to avoid import-time hard dep.
+        import torch  # type: ignore[import-not-found]  # ComfyUI ships torch; import locally to avoid import-time hard dep.
         if not isinstance(image, torch.Tensor) or image.ndim < 3:
             raise ValueError("image input is not a ComfyUI IMAGE tensor")
 
