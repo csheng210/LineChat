@@ -10,9 +10,9 @@ string usable by text-to-image / video-generation models.
 In ComfyUI a "video" is just a batch of IMAGE frames, so a single node handles
 both: B==1 -> image, B>1 -> video frames sampled in temporal order.
 
-Config (base_url / model / api_key) defaults come from the ComfyUI host's
-environment variables VTP_BASE_URL / VTP_MODEL / VTP_API_KEY, and can be
-overridden per-run from the node's input widgets.
+Config (base_url / model / api_key) is supplied by the workflow's node widgets;
+this node keeps no hardcoded model info. The workflow JSON is the source of
+truth, and the caller (front-end -> API) overrides the widgets per run.
 """
 from __future__ import annotations
 
@@ -27,9 +27,10 @@ from PIL import Image
 import requests
 
 
-DEFAULT_BASE_URL = os.environ.get("VTP_BASE_URL", "http://svc.summer-blue.com:8189/v1")
-DEFAULT_MODEL = os.environ.get("VTP_MODEL", "swift-1.5-iq3_xxs")
-DEFAULT_API_KEY = os.environ.get("VTP_API_KEY", "llamacpp")
+# No model info hardcoded here: the workflow node widgets carry base_url/model/api_key.
+DEFAULT_BASE_URL = ""
+DEFAULT_MODEL = ""
+DEFAULT_API_KEY = ""
 
 IMAGE_SYSTEM_PROMPT = (
     "You are a senior text-to-image prompt engineer. You receive a single image. "

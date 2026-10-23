@@ -45,8 +45,8 @@ import requests
 
 import comfy_core as core
 
-# 在 import 反推腳本前載入本目錄 .env, 讓 VTP_BASE_URL/VTP_MODEL/VTP_API_KEY 生效
-# (腳本於 import 時讀取 os.environ 作為預設值; 啟動腳本僅注入 COMFYAPI_PORT, 故需自行載入)
+# 在 import 反推腳本前載入本目錄 .env, 讓 COMFYUI_BASE_URL 等 ComfyAPI 設定生效
+# (comfy_core 於 import 時讀取 os.environ; 啟動腳本僅注入 COMFYAPI_PORT, 故需自行載入)
 def _load_local_env():
     env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
     if not os.path.isfile(env_path):
@@ -314,10 +314,7 @@ def resources_prompt(dir: str = Form("Prompt"), sub: str = Form(""), name: str =
     target.write_text(content, encoding="utf-8")
     return {"ok": True, "name": safe}
 
-# ---- 模型聊天(OpenAI 相容 /chat/completions, 沿用 VTP_* 伲服端設定) ----
-CHAT_BASE_URL = os.environ.get("VTP_BASE_URL", "http://svc.summer-blue.com:8189/v1")
-CHAT_MODEL = os.environ.get("VTP_MODEL", "myModelName")
-CHAT_API_KEY = os.environ.get("VTP_API_KEY", "Empty")
+# ---- 模型聊天(OpenAI 相容 /chat/completions): 模型資訊由前端選單帶入, 後端不寫死 ----
 
 
 class ChatMessage(BaseModel):
@@ -330,6 +327,9 @@ class ChatRequest(BaseModel):
     system: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 1024
+    base_url: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
 
 
 @app.post("/chat")
@@ -344,9 +344,14 @@ def chat_completions(req: ChatRequest):
         msgs.append({"role": m.role, "content": m.content})
     if not msgs:
         raise HTTPException(status_code=400, detail="messages 為空")
-    url = CHAT_BASE_URL.rstrip("/") + "/chat/completions"
-    headers = {"Authorization": "Bearer " + CHAT_API_KEY, "Content-Type": "application/json"}
-    payload = {"model": CHAT_MODEL, "messages": msgs, "temperature": req.temperature,
+    base_url = (req.base_url or "").strip()
+    model = (req.model or "").strip()
+    api_key = (req.api_key or "").strip()
+    if not base_url or not model:
+        raise HTTPException(status_code=400, detail="需由前端指定 base_url 與 model")
+    url = base_url.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
+    payload = {"model": model, "messages": msgs, "temperature": req.temperature,
                "max_tokens": req.max_tokens, "stream": False}
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=120)
@@ -361,11 +366,11 @@ def chat_completions(req: ChatRequest):
     text = (choices[0].get("message") or {}).get("content")
     if isinstance(text, list):
         text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
-    return {"reply": (text or "").strip(), "model": CHAT_MODEL}
+    return {"reply": (text or "").strip(), "model": model}
 
 
 @app.post("/chat/save")
-def chat_save(title: str = Form(""), messages: str = Form(...)):
+def chat_save(title: str = Form(""), messages: str = Form(...), model: str = Form("")):
     # 存儲聊天紀錄到 Resources/ChatHistory (內容為 JSON 字串 [{role,content}])。
     base = RESOURCES_ROOT / "ChatHistory"
     base.mkdir(parents=True, exist_ok=True)
@@ -376,7 +381,7 @@ def chat_save(title: str = Form(""), messages: str = Form(...)):
     if not isinstance(parsed, list):
         raise HTTPException(status_code=400, detail="messages 需為陣列")
     name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.json"
-    payload = {"title": title, "model": CHAT_MODEL,
+    payload = {"title": title, "model": model,
                "created": datetime.now().isoformat(timespec="seconds"), "messages": parsed}
     (base / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     return {"ok": True, "name": name}
@@ -1244,6 +1249,9 @@ def job_image2prompt(
     temperature: Optional[float] = Form(None),
     max_tokens: Optional[int] = Form(None),
     extra: Optional[str] = Form(None),
+    base_url: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
 ):
     data = image.file.read()
     if not data:
@@ -1255,7 +1263,8 @@ def job_image2prompt(
         try:
             return rip.generate(
                 image_path=path, target=target, max_side=max_side, temperature=temperature,
-                max_tokens=max_tokens, extra=extra, log=lambda *_: None,
+                max_tokens=max_tokens, extra=extra, base_url=base_url, model=model,
+                api_key=api_key, log=lambda *_: None,
                 progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
         finally:
             try:
@@ -1276,6 +1285,9 @@ def job_video2prompt(
     temperature: Optional[float] = Form(None),
     max_tokens: Optional[int] = Form(None),
     extra: Optional[str] = Form(None),
+    base_url: Optional[str] = Form(None),
+    model: Optional[str] = Form(None),
+    api_key: Optional[str] = Form(None),
 ):
     data = video.file.read()
     if not data:
@@ -1287,7 +1299,8 @@ def job_video2prompt(
         try:
             return rvp.generate(
                 video_path=path, target=target, max_frames=max_frames, max_side=max_side,
-                temperature=temperature, max_tokens=max_tokens, extra=extra, log=lambda *_: None,
+                temperature=temperature, max_tokens=max_tokens, extra=extra, base_url=base_url,
+                model=model, api_key=api_key, log=lambda *_: None,
                 progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
         finally:
             try:

@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { Fragment, useEffect, useState, useSyncExternalStore } from 'react'
 import { FUNCTIONS } from './imagegenFunctions.jsx'
 import ResourcesBrowser from './ResourcesBrowser.jsx'
 import ResourcesPicker from './ResourcesPicker.jsx'
@@ -13,6 +13,23 @@ import {
   startJob,
   subscribe,
 } from './genStore.js'
+
+// 反推/聊天用的 VLM 模型清單: 由 LineChatWeb/.env 的 VITE_VTP_MODELS 讀取, 不寫死在程式。
+//   格式: 以 ';' 分隔多個模型, 每個模型以 '|' 分隔欄位 -> id|label|base_url|api_key
+//   例: VITE_VTP_MODELS=qwen3.8-27b-uncensored|Qwen3.8-27B Uncensored|http://host:18300/v1|llamacpp;swift-1.5-iq3_xxs|Swift 1.5 IQ3|http://host:8189/v1|llamacpp
+//   預設選第一項。留空則不顯示選單, 反推沿用工作流節點內的原值。
+function parseVtpModels(raw) {
+  return (raw || '')
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((entry) => {
+      const [id, label, base_url, api_key] = entry.split('|').map((x) => (x || '').trim())
+      return { id, label: label || id, base_url, api_key }
+    })
+    .filter((m) => m.id && m.base_url)
+}
+export const VTP_MODELS = parseVtpModels(import.meta.env.VITE_VTP_MODELS)
 
 // ComfyUI 生圖/生影片頁面: 功能按鈕在 status bar(AuthGate), 此處依 active 產生表單與結果。
 //   經 Vite proxy /comfy/* -> ComfyAPI(FastAPI)。
@@ -90,7 +107,7 @@ export default function ImageGen({ active }) {
   const form = snap.forms[active] || DEFAULT_FORM
   const job = snap.jobs[active] || EMPTY_JOB
 
-  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target } = form
+  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target, vtpModel } = form
   const { busy, progress, phase, cancelling, stopped, error, result } = job
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
@@ -172,6 +189,12 @@ export default function ImageGen({ active }) {
     if (active === 'reversePrompt') {
       const fd = new FormData()
       if (target) fd.append('target', target)
+      const vtp = VTP_MODELS.find((m) => m.id === vtpModel) || VTP_MODELS[0]
+      if (vtp) {
+        fd.append('model', vtp.id)
+        fd.append('base_url', vtp.base_url)
+        fd.append('api_key', vtp.api_key)
+      }
       const isVid = image1.type && image1.type.startsWith('video/')
       if (isVid) {
         fd.append('video', image1)
@@ -317,6 +340,17 @@ export default function ImageGen({ active }) {
           )}
 
           {isReverse ? (
+            <Fragment>
+            {VTP_MODELS.length > 0 && (
+            <label className="gen-field">
+              <span className="gen-field-label">反推模型（要選哪個 VLM 來反推提示詞）</span>
+              <select className="gen-textarea" value={vtpModel} onChange={(e) => setForm(active, { vtpModel: e.target.value })}>
+                {VTP_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}（{m.id}）</option>
+                ))}
+              </select>
+            </label>
+            )}
             <label className="gen-field">
               <span className="gen-field-label">目標模型（選填, 讓提示詞風格貼近該模型）</span>
               <select className="gen-textarea" value={target} onChange={(e) => setForm(active, { target: e.target.value })}>
@@ -337,6 +371,7 @@ export default function ImageGen({ active }) {
                 </optgroup>
               </select>
             </label>
+            </Fragment>
           ) : (
             <label className="gen-field">
               <span className="gen-field-label">提示詞</span>
@@ -728,6 +763,7 @@ function ChatPanel() {
   const [note, setNote] = useState('')
   const [saving, setSaving] = useState(false)
   const [records, setRecords] = useState(null)
+  const [model, setModel] = useState(VTP_MODELS[0]?.id || '') // 聊天用的模型(對應 base_url/api_key), 預設第一項
 
   async function send() {
     const text = input.trim()
@@ -738,7 +774,9 @@ function ChatPanel() {
     setSending(true)
     setNote('')
     try {
-      const r = await fetch('/comfy/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next }) })
+      const vtp = VTP_MODELS.find((m) => m.id === model) || VTP_MODELS[0]
+      const body = vtp ? { messages: next, model: vtp.id, base_url: vtp.base_url, api_key: vtp.api_key } : { messages: next }
+      const r = await fetch('/comfy/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) { setNote('模型回應失敗: ' + (d.detail || r.status)); setSending(false); return }
       setMessages(next.concat([{ role: 'assistant', content: d.reply || '' }]))
@@ -756,6 +794,7 @@ function ChatPanel() {
       const fd = new FormData()
       fd.append('title', title)
       fd.append('messages', JSON.stringify(messages))
+      fd.append('model', model)
       const r = await fetch('/comfy/chat/save', { method: 'POST', body: fd })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) { setNote('儲存失敗: ' + (d.detail || r.status)); setSaving(false); return }
@@ -836,6 +875,13 @@ function ChatPanel() {
     <section className="gen-chat gen-outputs-page">
       <header className="gen-chat-header">
         <strong>模型聊天</strong>
+        {VTP_MODELS.length > 0 && (
+          <select className="gen-chat-title" value={model} onChange={(e) => setModel(e.target.value)} title="選擇聊天用的模型">
+            {VTP_MODELS.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        )}
         <input className="gen-chat-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="對誝標顈（儲存用）" />
         <button type="button" className="gen-chat-btn" onClick={() => { setMessages([]); setTitle(''); setNote('') }}>新對誝</button>
         <button type="button" className="gen-chat-btn" onClick={toggleRecords}>{records ? '關閉清單' : '聊天紀錄'}</button>

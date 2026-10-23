@@ -27,10 +27,8 @@ NODE_PREVIEW = "18"        # PreviewAny：輸出提示詞文字(來源 = Reverse
 DEFAULT_WORKFLOW = Path(__file__).resolve().parent / "samples" / "ReversePrompt_image2prompt.json"
 OUTPUT_DIR = Path(__file__).resolve().parent / "output" / "prompts"
 
-# base_url / model / api_key 預設取自 .env(VTP_*), 與圖生圖共用同一 VLM 設定
-DEFAULT_BASE_URL = os.environ.get("VTP_BASE_URL")
-DEFAULT_MODEL = os.environ.get("VTP_MODEL")
-DEFAULT_API_KEY = os.environ.get("VTP_API_KEY")
+# base_url / model / api_key 一律由工作流節點帶入(見 samples/ReversePrompt_image2prompt.json),
+# 本程式不再寫死模型資訊; 呼叫端未指定時沿用工作流內的原值。
 
 
 def build_workflow(image_name, params, wf_path):
@@ -56,9 +54,9 @@ def generate(image_path, target: Optional[str] = "", max_side=None, temperature=
         raise FileNotFoundError(f"找不到輸入圖：{img}")
 
     params = {
-        "base_url": base_url or DEFAULT_BASE_URL,
-        "model": model or DEFAULT_MODEL,
-        "api_key": api_key or DEFAULT_API_KEY,
+        "base_url": base_url,
+        "model": model,
+        "api_key": api_key,
         "target": target,
         "max_side": max_side,
         "temperature": temperature,

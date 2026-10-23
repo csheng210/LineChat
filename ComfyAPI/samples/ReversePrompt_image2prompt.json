@@ -13,8 +13,8 @@
   },
   "23": {
     "inputs": {
-      "base_url": "http://svc.summer-blue.com:8189/v1",
-      "model": "swift-1.5-iq3_xxs",
+      "base_url": "http://svc.summer-blue.com:18300/v1",
+      "model": "qwen3.8-27b-uncensored",
       "api_key": "llamacpp",
       "target": "qwen-image",
       "max_frames": 8,
