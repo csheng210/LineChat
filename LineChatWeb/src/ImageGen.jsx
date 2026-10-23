@@ -754,7 +754,7 @@ function OutputsBrowser() {
 }
 
 
-// 模型聊天: 對誝歷史走後端 /comfy/chat, 可存到 Resources/ChatHistory 並從該目錄載入縪續。
+// 模型聊天: 對話歷史走後端 /comfy/chat, 可存到 Resources/ChatHistory 並從該目錄載入繼續。
 function ChatPanel() {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -787,7 +787,7 @@ function ChatPanel() {
   }
 
   async function saveChat() {
-    if (!messages.length) { setNote('目前沒有對誝可儲存'); return }
+    if (!messages.length) { setNote('目前沒有對話可儲存'); return }
     setSaving(true)
     setNote('')
     try {
@@ -882,8 +882,8 @@ function ChatPanel() {
             ))}
           </select>
         )}
-        <input className="gen-chat-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="對誝標顈（儲存用）" />
-        <button type="button" className="gen-chat-btn" onClick={() => { setMessages([]); setTitle(''); setNote('') }}>新對誝</button>
+        <input className="gen-chat-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="對話標題（儲存用）" />
+        <button type="button" className="gen-chat-btn" onClick={() => { setMessages([]); setTitle(''); setNote('') }}>新對話</button>
         <button type="button" className="gen-chat-btn" onClick={toggleRecords}>{records ? '關閉清單' : '聊天紀錄'}</button>
         <button type="button" className="gen-chat-btn primary" onClick={saveChat} disabled={saving}>{saving ? '儲存中…' : '儲存紀錄'}</button>
       </header>
@@ -902,7 +902,6 @@ function ChatPanel() {
         </div>
       )}
       <div className="gen-chat-log">
-        {!messages.length && <p className="gen-hint">輸入文字開始與模型對誝，可儲存並在之後載入縪續。</p>}
         {messages.map((m, i) => (
           <div key={i} className={'gen-chat-msg gen-chat-' + m.role}>
             <span className="gen-chat-role">{m.role === 'user' ? '你' : '模型'}</span>
