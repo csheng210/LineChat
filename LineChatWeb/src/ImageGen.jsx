@@ -127,8 +127,8 @@ export default function ImageGen({ active }) {
 
   async function onPickImage(slot, file) {
     if (!file) {
-      if (slot === 1) setForm(active, { image1: null, preview1: '' })
-      else setForm(active, { image2: null, preview2: '' })
+      if (slot === 1) setForm(active, { image1: null, preview1: '', fileData1: '', fileName1: '', fileType1: '' })
+      else setForm(active, { image2: null, preview2: '', fileData2: '', fileName2: '', fileType2: '' })
       return
     }
     const isVid = !!(file.type && file.type.startsWith('video/'))
@@ -139,8 +139,10 @@ export default function ImageGen({ active }) {
     } else {
       url = await fileToBase64Preview(file)
     }
-    if (slot === 1) setForm(active, { image1: file, preview1: url })
-    else setForm(active, { image2: file, preview2: url })
+    // 原檔 dataURL: 供重新整理後還原成 File(圖片預覽即原檔, 直接沿用; 影片另讀原檔)。
+    const dataUrl = isVid ? await fileToBase64Preview(file) : url
+    if (slot === 1) setForm(active, { image1: file, preview1: url, fileData1: dataUrl, fileName1: file.name, fileType1: file.type })
+    else setForm(active, { image2: file, preview2: url, fileData2: dataUrl, fileName2: file.name, fileType2: file.type })
   }
 
   function validate() {
@@ -242,6 +244,8 @@ export default function ImageGen({ active }) {
   }
 
   if (active === 'resources') return <ResourcesBrowser />
+  if (active === 'queue') return <QueueManager />
+  if (active === 'outputs') return <OutputsBrowser />
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo || isFl2v // 圖生影片/首尾圖生影片才顯示秒數
@@ -474,6 +478,8 @@ export default function ImageGen({ active }) {
         </div>
       </section>
 
+
+
       {picker && (
         <ResourcesPicker
           dir={picker.dir}
@@ -484,5 +490,229 @@ export default function ImageGen({ active }) {
         />
       )}
     </div>
+  )
+}
+
+
+// 伺服器伺列管理: 輪詢 /comfy/queue, 區分執行中/排隊中, 可停止執行中任務或刪除排隊中任務。
+function QueueManager() {
+  const [q, setQ] = useState(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState('')
+  const reload = () => {
+    fetch('/comfy/queue')
+      .then((res) => res.json().catch(() => ({})).then((d) => ({ res, d })))
+      .then(({ res, d }) => {
+        if (!res.ok) { setErr(d.detail || ('HTTP ' + res.status)); return }
+        setErr('')
+        setQ(d)
+      })
+      .catch((e) => setErr(String((e && e.message) || e)))
+  }
+  useEffect(() => {
+    reload()
+    const t = setInterval(reload, 3000)
+    return () => clearInterval(t)
+  }, [])
+  const post = async (url, key) => {
+    setBusy(key)
+    try {
+      const res = await fetch(url, { method: 'POST' })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) setErr(d.detail || ('HTTP ' + res.status))
+    } catch (e) {
+      setErr(String((e && e.message) || e))
+    } finally {
+      setBusy('')
+      reload()
+    }
+  }
+  const stopRunning = (it) => post('/comfy/queue/cancel?scope=running', 'r:' + (it.prompt_id || it.index))
+  const delPending = (it) => post('/comfy/queue/cancel?scope=pending&index=' + encodeURIComponent(it.index), 'p:' + (it.prompt_id || it.index))
+  const clearAll = () => post('/comfy/queue/clear', 'clear')
+  const running = (q && q.running) || []
+  const pending = (q && q.pending) || []
+  return (
+    <section className="queue-mgr">
+      <header className="queue-mgr-header">
+        <strong>伺服器伺列</strong>
+        <span className="queue-mgr-counts">執行中 {q ? q.running_count : '\u2013'} · 排隊 {q ? q.pending_count : '\u2013'}</span>
+        <button type="button" className="queue-mgr-reload" onClick={reload}>重新整理</button>
+        <button type="button" className="queue-mgr-clear" disabled={busy === 'clear' || !q || q.pending_count === 0} onClick={clearAll}>清空排隊</button>
+      </header>
+      {err && <div className="queue-mgr-err">{err}</div>}
+      {!err && !q && <div className="queue-mgr-empty">讀取伺列中…</div>}
+      <div className="queue-mgr-group">
+        <div className="queue-mgr-group-title">執行中</div>
+        {running.length === 0 && <div className="queue-mgr-empty">目前沒有執行中的任務</div>}
+        <ul className="queue-mgr-list">
+          {running.map((it, i) => (
+            <li key={'r' + (it.prompt_id || i)} className="queue-mgr-item queue-mgr-running">
+              <span className="queue-mgr-tag">執行中</span>
+              <span className="queue-mgr-text">{it.prompt || '(\u7121\u63d0\u793a\u8a5e)'}</span>
+              <span className="queue-mgr-meta">{it.prompt_id ? it.prompt_id.slice(0, 8) : ''}</span>
+              <button type="button" className="queue-mgr-btn queue-mgr-btn-stop" disabled={busy === ('r:' + (it.prompt_id || it.index))} onClick={() => stopRunning(it)}>停止</button>
+            </li>
+          ))}
+        </ul>
+      </div>
+      <div className="queue-mgr-group">
+        <div className="queue-mgr-group-title">排隊中</div>
+        {pending.length === 0 && <div className="queue-mgr-empty">目前沒有排隊中的任務</div>}
+        <ul className="queue-mgr-list">
+          {pending.map((it, i) => (
+            <li key={'p' + (it.prompt_id || i)} className="queue-mgr-item">
+              <span className="queue-mgr-tag queue-mgr-tag-pending">排隊 #{i + 1}</span>
+              <span className="queue-mgr-text">{it.prompt || '(\u7121\u63d0\u793a\u8a5e)'}</span>
+              <span className="queue-mgr-meta">{it.prompt_id ? it.prompt_id.slice(0, 8) : ''}</span>
+              <button type="button" className="queue-mgr-btn queue-mgr-btn-del" disabled={busy === ('p:' + (it.prompt_id || it.index))} onClick={() => delPending(it)}>刪除</button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+  )
+}
+
+// 輸出檔案瀏覽: 任務輸出(代理 /history) 與 目錄瀏覽(代理 /internal/files) 兩種模式。
+function OutputsBrowser() {
+  const [mode, setMode] = useState('task')
+  const [items, setItems] = useState(null)
+  const [dirItems, setDirItems] = useState(null)
+  const [subfolder, setSubfolder] = useState('')
+  const [err, setErr] = useState('')
+  const [active, setActive] = useState(null)
+  const loadTask = () => {
+    setItems(null)
+    fetch('/comfy/outputs?limit=60')
+      .then((res) => res.json().catch(() => ({})).then((d) => ({ res, d })))
+      .then(({ res, d }) => {
+        if (!res.ok) { setErr(d.detail || ('HTTP ' + res.status)); return }
+        setErr('')
+        setItems(d.outputs || [])
+      })
+      .catch((e) => setErr(String((e && e.message) || e)))
+  }
+  const loadDir = (sub) => {
+    setDirItems(null)
+    fetch('/comfy/outputs/dir?subfolder=' + encodeURIComponent(sub || '') + '&limit=200')
+      .then((res) => res.json().catch(() => ({})).then((d) => ({ res, d })))
+      .then(({ res, d }) => {
+        if (!res.ok) { setErr(d.detail || ('HTTP ' + res.status)); setDirItems([]); return }
+        setErr('')
+        setDirItems(d.items || [])
+      })
+      .catch((e) => setErr(String((e && e.message) || e)))
+  }
+  const reload = () => { if (mode === 'task') loadTask(); else loadDir(subfolder) }
+  useEffect(() => {
+    if (mode === 'task') loadTask(); else loadDir(subfolder)
+  }, [mode, subfolder])
+  const taskViewUrl = (it) => '/comfy/outputs/view?filename=' + encodeURIComponent(it.filename) +
+    '&subfolder=' + encodeURIComponent(it.subfolder || '') + '&type=' + encodeURIComponent(it.type || 'output')
+  const dirSub = (path) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '')
+  const dirViewUrl = (it) => '/comfy/outputs/view?filename=' + encodeURIComponent(it.name) +
+    '&subfolder=' + encodeURIComponent(dirSub(it.path || it.name)) + '&type=output'
+  const modalViewUrl = (it) => (it._dir ? dirViewUrl(it) : taskViewUrl(it))
+  const extOf = (name) => ((name || '').split('.').pop() || '').toLowerCase()
+  const isVideoExt = (name) => ['mp4', 'webm', 'mov'].includes(extOf(name))
+  const isImgExt = (name) => ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp'].includes(extOf(name))
+  const isVideo = (it) => {
+    const kind = (it.metadata && it.metadata.kind) || ''
+    return kind === 'video' || isVideoExt(it.filename)
+  }
+  const modalIsVideo = (it) => (it._dir ? isVideoExt(it.filename) : isVideo(it))
+  const crumbs = (subfolder || '').split('/').filter(Boolean)
+  const goCrumb = (i) => setSubfolder(crumbs.slice(0, i).join('/'))
+  return (
+    <section className="gen-outputs gen-outputs-page">
+      <header className="gen-outputs-header">
+        <strong>瀏覽伲服器檔案</strong>
+        <div className="gen-outputs-modes">
+          <button type="button" className={'gen-outputs-mode' + (mode === 'task' ? ' is-active' : '')} onClick={() => setMode('task')}>任務輸出</button>
+          <button type="button" className={'gen-outputs-mode' + (mode === 'dir' ? ' is-active' : '')} onClick={() => setMode('dir')}>目錄</button>
+        </div>
+        <span className="gen-outputs-counts">{mode === 'task' ? (items ? '共 ' + items.length + ' 個' : '載入中') : (dirItems ? '共 ' + dirItems.length + ' 項' : '載入中')}</span>
+        <button type="button" className="gen-outputs-reload" onClick={reload}>重新整理</button>
+      </header>
+      {mode === 'dir' && (
+        <div className="gen-outputs-crumbs">
+          <button type="button" className={'gen-crumb' + (subfolder === '' ? ' is-active' : '')} onClick={() => setSubfolder('')}>output</button>
+          {crumbs.map((c, i) => (
+            <span key={c + i} className="gen-crumb-sep">
+              <span className="gen-crumb-sep-char">/</span>
+              <button type="button" className="gen-crumb" onClick={() => goCrumb(i + 1)}>{c}</button>
+            </span>
+          ))}
+        </div>
+      )}
+      {err && <div className="gen-outputs-err">{err}{mode === 'dir' ? '（建謉改用「任務輸出」模式）' : ''}</div>}
+      {mode === 'task' && !err && !items && <div className="gen-outputs-empty">載入輸出中。</div>}
+      {mode === 'task' && !err && items && items.length === 0 && <div className="gen-outputs-empty">目前沒有輸出檔案</div>}
+      {mode === 'task' && !err && items && items.length > 0 && (
+        <div className="gen-outputs-grid">
+          {items.map((it, i) => (
+            <button type="button" key={it.prompt_id + '|' + it.filename + '|' + i} className="gen-output-card" onClick={() => setActive(it)}>
+              <span className="gen-output-thumb">
+                {isVideo(it)
+                  ? <video src={taskViewUrl(it)} muted playsInline preload="metadata" />
+                  : <img src={taskViewUrl(it)} alt={it.filename} loading="lazy" />}
+                {isVideo(it) && <span className="gen-output-badge">影片</span>}
+              </span>
+              <span className="gen-output-name">{it.filename}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {mode === 'dir' && !err && !dirItems && <div className="gen-outputs-empty">載入目錄中。</div>}
+      {mode === 'dir' && !err && dirItems && dirItems.length === 0 && <div className="gen-outputs-empty">此目錄為空</div>}
+      {mode === 'dir' && !err && dirItems && dirItems.length > 0 && (
+        <div className="gen-outputs-grid">
+          {dirItems.map((it, i) => (
+            it.type === 'directory' ? (
+              <button type="button" key={it.path + '|d' + i} className="gen-output-card gen-output-dir" onClick={() => setSubfolder(it.path)}>
+                <span className="gen-output-thumb gen-output-dir-icon">📁</span>
+                <span className="gen-output-name">{it.name}/</span>
+              </button>
+            ) : (
+              <button type="button" key={it.path + '|f' + i} className="gen-output-card" onClick={() => setActive({ filename: it.name, path: it.path, subfolder: dirSub(it.path || it.name), type: 'output', _dir: true })}>
+                <span className="gen-output-thumb">
+                  {isVideoExt(it.name)
+                    ? <video src={dirViewUrl(it)} muted playsInline preload="metadata" />
+                    : isImgExt(it.name)
+                      ? <img src={dirViewUrl(it)} alt={it.name} loading="lazy" />
+                      : <span className="gen-output-file-icon">📄</span>}
+                  {isVideoExt(it.name) && <span className="gen-output-badge">影片</span>}
+                </span>
+                <span className="gen-output-name">{it.name}</span>
+              </button>
+            )
+          ))}
+        </div>
+      )}
+      {active && (
+        <div className="gen-output-modal" onClick={() => setActive(null)}>
+          <div className="gen-output-modal-body" onClick={(e) => e.stopPropagation()}>
+            <div className="gen-output-modal-head">
+              <span className="gen-output-modal-title">{active.filename}</span>
+              <button type="button" className="gen-output-modal-close" onClick={() => setActive(null)}>關閉</button>
+            </div>
+            <div className="gen-output-modal-media">
+              {modalIsVideo(active)
+                ? <video src={modalViewUrl(active)} controls autoPlay playsInline />
+                : isImgExt(active.filename)
+                  ? <img src={modalViewUrl(active)} alt={active.filename} />
+                  : <div className="gen-output-modal-nopreview">此檔案型別不支援內建預覽</div>}
+            </div>
+            <div className="gen-output-modal-meta">
+              <span>prompt {active.prompt_id ? active.prompt_id.slice(0, 8) : ''}</span>
+              {active.metadata && active.metadata.width ? <span>{active.metadata.width}×{active.metadata.height}</span> : null}
+              {active.metadata && active.metadata.duration ? <span>{active.metadata.duration}s</span> : null}
+              <a className="gen-output-modal-dl" href={modalViewUrl(active)} download={active.filename}>下載</a>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
   )
 }

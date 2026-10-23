@@ -40,6 +40,7 @@ from fastapi.responses import JSONResponse, Response, FileResponse
 from pydantic import BaseModel
 
 import cv2
+import requests
 
 import comfy_core as core
 
@@ -275,6 +276,27 @@ def resources_delete(dir: str = Form(...), sub: str = Form(""), name: str = Form
         raise HTTPException(status_code=404, detail="檔案不存在")
     target.unlink()
     return {"ok": True, "name": safe}
+
+@app.post("/resources/move-up")
+def resources_move_up(dir: str = Form(...), sub: str = Form(""), name: str = Form(...)):
+    # 將當前目錄的檔案移到上層目錄(例: Video/output → Video)。已在頂層則拒絕。
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    rel = Path(sub) if sub else Path(".")
+    parent_sub = "" if str(rel.parent) == "." else str(rel.parent)
+    if parent_sub == sub:
+        raise HTTPException(status_code=400, detail="已在頂層目錄，無法再往上層移動")
+    parent = _resources_dir_path(dir, parent_sub)
+    target = parent / safe
+    if target.exists():
+        raise HTTPException(status_code=409, detail="上層目錄已有同名檔案")
+    src.rename(target)
+    return {"ok": True, "name": safe, "from": sub, "to": parent_sub}
 
 @app.post("/resources/prompt")
 def resources_prompt(dir: str = Form("Prompt"), sub: str = Form(""), name: str = Form(...), content: str = Form("")):
@@ -628,6 +650,163 @@ def _start_job(job_id, runner):
                     j["error"] = str(e)
 
     threading.Thread(target=worker, daemon=True).start()
+
+
+def _summarize_queue_item(item):
+    # ComfyUI /queue 每項格式: [index, prompt_id, workflow(節點圖), extra_prompt_data, server_ids]
+    try:
+        index, prompt_id, workflow = item[0], item[1], item[2]
+    except Exception:
+        return {"index": None, "prompt_id": None, "prompt": "", "nodes": 0}
+    prompt_text = ""
+    nodes = 0
+    if isinstance(workflow, dict):
+        nodes = len(workflow)
+        for node in workflow.values():
+            inputs = node.get("inputs") if isinstance(node, dict) else None
+            if isinstance(inputs, dict) and isinstance(inputs.get("prompt"), str) and inputs["prompt"].strip():
+                prompt_text = inputs["prompt"].strip()
+                break
+    return {"index": index, "prompt_id": prompt_id, "prompt": prompt_text[:200], "nodes": nodes}
+
+
+@app.get("/queue")
+def queue_status():
+    # 代理 ComfyUI /queue: 回傳執行中(running)與排隊(pending)任務的精簡清單。
+    try:
+        r = requests.get(f"{core.HTTP_BASE}/queue", timeout=15)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /queue 回應異常")
+    data = r.json()
+    running = [_summarize_queue_item(it) for it in data.get("queue_running", [])]
+    pending = [_summarize_queue_item(it) for it in data.get("queue_pending", [])]
+    return {
+        "running": running,
+        "pending": pending,
+        "running_count": len(running),
+        "pending_count": len(pending),
+    }
+
+
+def _summarize_history_outputs(history):
+    # ComfyUI /history: { prompt_id: { prompt, outputs: { nodeId: { images:[...] } }, status } }
+    items = []
+    for prompt_id, entry in history.items():
+        outputs = entry.get("outputs") if isinstance(entry, dict) else None
+        if not isinstance(outputs, dict):
+            continue
+        for node_out in outputs.values():
+            if not isinstance(node_out, dict):
+                continue
+            for img in node_out.get("images", []):
+                if not isinstance(img, dict):
+                    continue
+                if img.get("type") != "output":
+                    continue
+                items.append({
+                    "prompt_id": prompt_id,
+                    "filename": img.get("filename"),
+                    "subfolder": img.get("subfolder", ""),
+                    "type": img.get("type", "output"),
+                    "metadata": img.get("metadata") or {},
+                })
+    return items
+
+
+@app.get("/outputs")
+def list_outputs(limit: int = Query(60, ge=1, le=500)):
+    # 代理 ComfyUI /history: 彙整所有已完成任務的輸出檔案清單(由新到舊)。
+    try:
+        r = requests.get(f"{core.HTTP_BASE}/history", timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /history 回應異常")
+    items = _summarize_history_outputs(r.json())
+    items.reverse()
+    return {"count": len(items), "outputs": items[:limit]}
+
+
+@app.get("/outputs/dir")
+def list_output_dir(subfolder: str = Query(""), limit: int = Query(100, ge=1, le=500), offset: int = Query(0, ge=0)):
+    # 列出 ComfyUI output 目錄內容(含子目錄): 代理 /internal/files。若前置 proxy 不放行則回 502。
+    params = {"dir": "output", "subdir": subfolder, "type": "all", "limit": limit, "offset": offset}
+    try:
+        r = requests.get(f"{core.HTTP_BASE}/internal/files", params=params, timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if r.status_code == 404:
+        raise HTTPException(status_code=502, detail="此 ComfyUI 前置 proxy 不開放目錄清單端點 (/internal/files)，改用任務輸出模式")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /internal/files 回應異常")
+    data = r.json()
+    items = []
+    for it in data.get("items", []):
+        items.append({
+            "name": it.get("name"),
+            "path": it.get("path"),
+            "type": it.get("type"),
+            "size": it.get("size"),
+            "modified": it.get("modified"),
+            "extension": it.get("extension"),
+        })
+    return {"subfolder": subfolder, "total": data.get("total", len(items)), "items": items}
+
+
+@app.get("/outputs/view")
+def view_output(filename: str = Query(...), subfolder: str = Query(""), type: str = Query("output")):
+    # 代理 ComfyUI /view: 下載輸出檔案 bytes, 依副檔名給 media_type。
+    params = {"filename": filename, "subfolder": subfolder, "type": type}
+    try:
+        r = requests.get(f"{core.HTTP_BASE}/view", params=params, timeout=60)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /view 回應異常")
+    suffix = Path(filename).suffix.lower()
+    media_types = {
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+        ".webp": "image/webp", ".gif": "image/gif", ".mp4": "video/mp4",
+        ".webm": "video/webm", ".mov": "video/quicktime",
+    }
+    media_type = media_types.get(suffix, r.headers.get("Content-Type", "application/octet-stream"))
+    return Response(content=r.content, media_type=media_type)
+
+
+@app.post("/queue/cancel")
+def queue_cancel(scope: str = Query("running"), index: int = Query(-1)):
+    # 停止執行中: 代理 ComfyUI POST /interrupt; 刪除排隊中: 代理 POST /queue {"delete":[index]}。
+    if scope == "running":
+        try:
+            r = requests.post(f"{core.HTTP_BASE}/interrupt", timeout=15)
+        except requests.RequestException as e:
+            raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+        if not r.ok:
+            raise HTTPException(status_code=r.status_code, detail="ComfyUI /interrupt 異常")
+        return {"ok": True, "scope": "running"}
+    if index < 0:
+        raise HTTPException(status_code=400, detail="缺少排隊索引 index")
+    try:
+        r = requests.post(f"{core.HTTP_BASE}/queue", json={"delete": [index]}, timeout=15)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /queue delete 異常")
+    return {"ok": True, "scope": "pending", "index": index}
+
+
+@app.post("/queue/clear")
+def queue_clear():
+    # 清空所有排隊中任務: 代理 ComfyUI POST /queue {"clear": true}。
+    try:
+        r = requests.post(f"{core.HTTP_BASE}/queue", json={"clear": True}, timeout=15)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if not r.ok:
+        raise HTTPException(status_code=r.status_code, detail="ComfyUI /queue clear 異常")
+    return {"ok": True}
 
 
 @app.get("/job")

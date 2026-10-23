@@ -2,7 +2,8 @@
 //   重點: 生成任務不綁在 ImageGen 元件生命週期上, 切到首頁/航班(甚至重新整理)再切回來,
 //   都接得回同一個任務的進度與結果; 每個功能(text2img/image1/image2/image2video/...)各自獨立。
 const COMFY = '/comfy'
-const STORE_KEY = 'linechat.genJobs' // sessionStorage: 記錄各功能進行中的 job_id, 供重新整理後接回
+const STORE_KEY = 'linechat.genJobs' // localStorage: 記錄各功能進行中的 job_id, 供重新整理/換分頁/關分頁重開後接回(跨分頁存活)
+const FORM_KEY = 'linechat.genForms' // localStorage: 持久化各功能表單(提示詞/長寬/種子/輸入圖影片 dataURL), 供重新整理/換分頁後還原
 
 export const DEFAULT_VIDEO_PROMPT = `片長總長度15秒
 黄昏的咖啡馆靠窗位置，窗外下着小雨。一位穿米色针织衫的女性
@@ -22,6 +23,13 @@ export const DEFAULT_FORM = {
   preview1: '',
   preview2: '',
   target: '', // 反推提示詞: 目標模型預設(image/video)
+  // 輸入圖/影片的原檔 dataURL 與中繼資料: 供重新整理後還原成 File(圖片可直接還原; 影片超量時退回縮圖預覽)。
+  fileData1: '',
+  fileData2: '',
+  fileName1: '',
+  fileName2: '',
+  fileType1: '',
+  fileType2: '',
 }
 
 export const EMPTY_JOB = {
@@ -57,6 +65,7 @@ export function getSnapshot() {
 export function setForm(id, patch) {
   forms[id] = { ...DEFAULT_FORM, ...forms[id], ...patch }
   emit()
+  schedulePersistForm(id)
 }
 
 function setJob(id, patch) {
@@ -64,24 +73,99 @@ function setJob(id, patch) {
   emit()
 }
 
-// sessionStorage 記錄進行中的 job_id(重新整理後可接回同一個後端任務)。
+// localStorage 記錄進行中的 job_id(重新整理後可接回同一個後端任務)。
 function persistJobId(id, jobId) {
   try {
-    const map = JSON.parse(sessionStorage.getItem(STORE_KEY) || '{}')
+    const map = JSON.parse(localStorage.getItem(STORE_KEY) || '{}')
     if (jobId) map[id] = jobId
     else delete map[id]
-    sessionStorage.setItem(STORE_KEY, JSON.stringify(map))
+    localStorage.setItem(STORE_KEY, JSON.stringify(map))
   } catch {
-    /* 無 sessionStorage(無痕模式)時忽略 */
+    /* 無 localStorage(無痕模式)時忽略 */
   }
 }
 
 function loadPersisted() {
   try {
-    return JSON.parse(sessionStorage.getItem(STORE_KEY) || '{}') || {}
+    return JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}
   } catch {
     return {}
   }
+}
+
+// 表單持久化: 只存可序列化欄位; 圖片/影片以原檔 dataURL 保存, 重新整理後還原成 File。
+function serializeForm(form) {
+  const isVid1 = (form.fileType1 || '').startsWith('video/')
+  const isVid2 = (form.fileType2 || '').startsWith('video/')
+  return {
+    prompt: form.prompt || '',
+    width: form.width,
+    height: form.height,
+    seed: form.seed,
+    duration: form.duration,
+    target: form.target || '',
+    fileData1: form.fileData1 || '',
+    fileData2: form.fileData2 || '',
+    fileName1: form.fileName1 || '',
+    fileName2: form.fileName2 || '',
+    fileType1: form.fileType1 || '',
+    fileType2: form.fileType2 || '',
+    // 圖片預覽等同原檔 dataURL, 不重複存; 影片只存縮圖預覽(原檔另存 fileData)。
+    preview1: isVid1 ? (form.preview1 || '') : '',
+    preview2: isVid2 ? (form.preview2 || '') : '',
+  }
+}
+
+function persistForm(id) {
+  const form = forms[id]
+  if (!form) return
+  const write = (obj) => {
+    const map = JSON.parse(localStorage.getItem(FORM_KEY) || '{}')
+    if (obj) map[id] = obj
+    else delete map[id]
+    localStorage.setItem(FORM_KEY, JSON.stringify(map))
+  }
+  try {
+    write(serializeForm(form))
+  } catch {
+    // 容量超限(多為大影片 dataURL): 退回只存文字欄位與縮圖預覽, 丟棄原檔 dataURL。
+    try {
+      const s = serializeForm(form)
+      s.fileData1 = ''
+      s.fileData2 = ''
+      write(s)
+    } catch {
+      /* 仍失敗(無痕模式等): 忽略 */
+    }
+  }
+}
+
+function loadPersistedForms() {
+  try {
+    return JSON.parse(localStorage.getItem(FORM_KEY) || '{}') || {}
+  } catch {
+    return {}
+  }
+}
+
+// dataURL -> File(同步, 供模組載入時還原輸入圖/影片)。
+function dataUrlToFile(dataUrl, name, type) {
+  const comma = dataUrl.indexOf(',')
+  if (comma < 0) return null
+  const meta = dataUrl.slice(0, comma)
+  const b64 = dataUrl.slice(comma + 1)
+  const mime = (meta.match(/:(.*?);/) || [])[1] || type || 'application/octet-stream'
+  const bin = atob(b64)
+  const arr = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+  return new File([arr], name || 'input', { type: mime })
+}
+
+// 合併短時間內多次 setForm(如打字)後再寫入, 避免每字都序列化大 dataURL。
+let persistTimer = null
+function schedulePersistForm(id) {
+  clearTimeout(persistTimer)
+  persistTimer = setTimeout(() => persistForm(id), 400)
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -182,7 +266,21 @@ export function hasRunningJob(snap) {
   return Object.values(src).some((j) => j && j.busy)
 }
 
-// 重新整理後接回: 對 sessionStorage 裡還留下的 job_id 繼續輪詢。
+// 重新整理後還原表單: 提示詞/長寬/種子/輸入圖影片(圖片與小檔案還原成 File; 大影片退回縮圖預覽, 需重選)。
+for (const [id, saved] of Object.entries(loadPersistedForms())) {
+  if (!saved) continue
+  const form = { ...DEFAULT_FORM, ...saved }
+  form.image1 = saved.fileData1 ? dataUrlToFile(saved.fileData1, saved.fileName1, saved.fileType1) : null
+  form.image2 = saved.fileData2 ? dataUrlToFile(saved.fileData2, saved.fileName2, saved.fileType2) : null
+  const vid1 = (saved.fileType1 || '').startsWith('video/')
+  const vid2 = (saved.fileType2 || '').startsWith('video/')
+  form.preview1 = saved.preview1 || (!vid1 && saved.fileData1 ? saved.fileData1 : '')
+  form.preview2 = saved.preview2 || (!vid2 && saved.fileData2 ? saved.fileData2 : '')
+  forms[id] = form
+}
+emit()
+
+// 重新整理後接回: 對 localStorage 裡還留下的 job_id 繼續輪詢。
 for (const [id, jobId] of Object.entries(loadPersisted())) {
   if (!jobId) continue
   setJob(id, { ...EMPTY_JOB, busy: true, jobId, phase: '接回任務中…' })

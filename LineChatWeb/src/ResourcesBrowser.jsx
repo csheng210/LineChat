@@ -122,6 +122,22 @@ export default function ResourcesBrowser() {
     }
     refresh()
   }
+  async function moveUp(it) {
+    if (!sub) { setError('已在頂層目錄，無法再往上層移動'); return }
+    if (!window.confirm('把「' + it.name + '」移到上層目錄?')) return
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', it.name)
+    const r = await fetch('/comfy/resources/move-up', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('移動失敗: ' + (d.detail || r.status))
+      return
+    }
+    refresh()
+  }
+
 
   async function createPrompt() {
     if (!pName.trim()) { setError('請輸入檔名'); return }
@@ -229,6 +245,9 @@ export default function ResourcesBrowser() {
             const dim = m.w && m.h ? m.w + '×' + m.h : ''
             return (
               <div key={'f:' + it.name} className="res-card" role="button" tabIndex={0} onClick={() => open(it)}>
+                {sub && (
+                  <button className="res-card-up" title="往上層目錄移動" aria-label="往上層移動" onClick={(e) => { e.stopPropagation(); moveUp(it) }}>↑</button>
+                )}
                 <button className="res-card-del" title="刪除" aria-label="刪除" onClick={(e) => { e.stopPropagation(); delFile(it) }}>✕</button>
                 {it.kind === 'image' ? (
                   <img className="res-thumb" src={fileUrl(dir, sub, it.name)} alt={it.name} loading="lazy"
