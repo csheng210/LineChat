@@ -1365,3 +1365,62 @@
 .gen-outputs-page { margin-top: 0; padding-top: 0; border-top: none; max-width: 900px; }
 .gen-outputs-page .gen-outputs-header strong { font-size: 16px; }
 .gen-outputs-page .gen-outputs-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+
+.gen-chat { display: flex; flex-direction: column; gap: 10px; }
+.gen-chat-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gen-chat-header strong { font-size: 16px; margin-right: 4px; }
+.gen-chat-title { flex: 1 1 160px; min-width: 120px; font-size: 13px; padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: inherit; }
+.gen-chat-btn { font-size: 12px; padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: inherit; cursor: pointer; }
+.gen-chat-btn:hover { background: rgba(255,255,255,0.12); }
+.gen-chat-btn.primary { background: #06c755; border-color: #06c755; color: #04240f; font-weight: 600; }
+.gen-chat-btn:disabled { opacity: 0.5; cursor: default; }
+.gen-chat-note { font-size: 12px; padding: 6px 10px; border-radius: 6px; background: rgba(6,199,85,0.12); border: 1px solid rgba(6,199,85,0.3); }
+.gen-chat-log { display: flex; flex-direction: column; gap: 10px; flex: 1 1 auto; overflow-y: auto; min-height: 200px; max-height: calc(100vh - 220px); padding: 4px; }
+.gen-chat-msg { display: flex; gap: 8px; padding: 8px 12px; border-radius: 10px; max-width: 82%; }
+.gen-chat-user { align-self: flex-end; background: rgba(6,199,85,0.14); border: 1px solid rgba(6,199,85,0.28); }
+.gen-chat-assistant { align-self: flex-start; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); }
+.gen-chat-role { flex: 0 0 auto; font-size: 11px; font-weight: 700; opacity: 0.7; padding-top: 2px; }
+.gen-chat-text { font-size: 13px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.gen-chat-typing { opacity: 0.6; font-style: italic; }
+.gen-chat-inputbar { display: flex; gap: 8px; align-items: flex-end; }
+.gen-chat-input { flex: 1 1 auto; font-size: 13px; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.18); background: rgba(255,255,255,0.06); color: inherit; resize: vertical; }
+.gen-chat-send { flex: 0 0 auto; font-size: 13px; padding: 9px 18px; border-radius: 8px; border: 0; background: #06c755; color: #04240f; font-weight: 600; cursor: pointer; }
+.gen-chat-send:disabled { opacity: 0.5; cursor: default; }
+.gen-chat-records {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid rgba(120,120,120,0.25);
+  border-radius: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.gen-chat-rec {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gen-chat-rec-name {
+  flex: 1;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gen-chat-rec-meta {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.gen-chat-rec-btn {
+  font-size: 12px;
+  padding: 3px 8px;
+  border: 1px solid rgba(120,120,120,0.35);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+.gen-chat-rec-btn:hover {
+  background: rgba(120,120,120,0.12);
+}

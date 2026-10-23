@@ -25,6 +25,7 @@ ComfyUI 生圖服務（FastAPI）
   或 python app.py
 """
 import base64
+import json
 import os
 import tempfile
 import threading
@@ -167,7 +168,8 @@ def health():
 
 # ---- 多媒體瀏覽(Resources): 瀏覽 LineChatWeb/Resources 下的 Video/Image/Prompt ----
 RESOURCES_ROOT = Path(__file__).resolve().parent.parent / "LineChatWeb" / "Resources"
-RESOURCES_DIRS = {"Video", "Image", "Prompt"}
+RESOURCES_DIRS = {"Video", "Image", "Prompt", "ChatHistory"}
+(RESOURCES_ROOT / "ChatHistory").mkdir(parents=True, exist_ok=True)
 
 
 def _save_resource(kind: str, data: bytes, ext: str) -> Optional[str]:
@@ -311,6 +313,95 @@ def resources_prompt(dir: str = Form("Prompt"), sub: str = Form(""), name: str =
         raise HTTPException(status_code=409, detail="檔名已存在")
     target.write_text(content, encoding="utf-8")
     return {"ok": True, "name": safe}
+
+# ---- 模型聊天(OpenAI 相容 /chat/completions, 沿用 VTP_* 伲服端設定) ----
+CHAT_BASE_URL = os.environ.get("VTP_BASE_URL", "http://svc.summer-blue.com:8189/v1")
+CHAT_MODEL = os.environ.get("VTP_MODEL", "myModelName")
+CHAT_API_KEY = os.environ.get("VTP_API_KEY", "Empty")
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+    system: Optional[str] = None
+    temperature: float = 0.7
+    max_tokens: int = 1024
+
+
+@app.post("/chat")
+def chat_completions(req: ChatRequest):
+    # 將前端對誝歷史轉給模型, 回傳助手回答文字。
+    msgs = []
+    if req.system:
+        msgs.append({"role": "system", "content": req.system})
+    for m in req.messages:
+        if m.role not in ("user", "assistant", "system"):
+            raise HTTPException(status_code=400, detail="role 必須為 user/assistant/system")
+        msgs.append({"role": m.role, "content": m.content})
+    if not msgs:
+        raise HTTPException(status_code=400, detail="messages 為空")
+    url = CHAT_BASE_URL.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": "Bearer " + CHAT_API_KEY, "Content-Type": "application/json"}
+    payload = {"model": CHAT_MODEL, "messages": msgs, "temperature": req.temperature,
+               "max_tokens": req.max_tokens, "stream": False}
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=120)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線模型服務: {e}")
+    if r.status_code >= 400:
+        raise HTTPException(status_code=502, detail=f"模型服務 HTTP {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    choices = data.get("choices") or []
+    if not choices:
+        raise HTTPException(status_code=502, detail="模型無回應")
+    text = (choices[0].get("message") or {}).get("content")
+    if isinstance(text, list):
+        text = "".join(p.get("text", "") for p in text if isinstance(p, dict))
+    return {"reply": (text or "").strip(), "model": CHAT_MODEL}
+
+
+@app.post("/chat/save")
+def chat_save(title: str = Form(""), messages: str = Form(...)):
+    # 存儲聊天紀錄到 Resources/ChatHistory (內容為 JSON 字串 [{role,content}])。
+    base = RESOURCES_ROOT / "ChatHistory"
+    base.mkdir(parents=True, exist_ok=True)
+    try:
+        parsed = json.loads(messages)
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="messages 需為 JSON 字串")
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail="messages 需為陣列")
+    name = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:6]}.json"
+    payload = {"title": title, "model": CHAT_MODEL,
+               "created": datetime.now().isoformat(timespec="seconds"), "messages": parsed}
+    (base / name).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {"ok": True, "name": name}
+
+
+@app.post("/chat/rename")
+def chat_rename(name: str = Form(...), new_name: str = Form(...)):
+    base = RESOURCES_ROOT / "ChatHistory"
+    safe = Path(name).name
+    if not safe.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="仅可更名 .json ")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="案案不存在")
+    nn = Path(new_name).name.strip()
+    if not nn:
+        raise HTTPException(status_code=400, detail="新段名不可点空")
+    if not nn.lower().endswith(".json"):
+        nn = nn + ".json"
+    target = base / nn
+    if target.exists():
+        raise HTTPException(status_code=409, detail="已有同名段案")
+    src.rename(target)
+    return {"ok": True, "name": nn}
+
 
 @app.post("/text2img")
 def text2img(req: Text2ImgRequest):

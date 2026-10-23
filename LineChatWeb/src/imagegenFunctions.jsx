@@ -132,4 +132,14 @@ export const FUNCTIONS = [
       </svg>
     ),
   },
+  {
+    id: 'chat',
+    label: '模型聊天',
+    desc: '輸入文字問模型, 可儲存/載入聊天紀錄',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      </svg>
+    ),
+  },
 ]

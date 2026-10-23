@@ -3,7 +3,7 @@ import { Fragment, useEffect, useState } from 'react'
 // 從伺服器 Resources 目錄選取檔案的彈窗(供生圖功能選圖/選影片/選提示詞)。
 //   清單走 GET /comfy/resources/list?dir=&sub=, 檔案走 /comfy/resources/file?dir=&sub=&name=。
 //   kind: 'image' | 'video' | 'prompt'。選檔案 -> onPickFile(File); 選提示詞 -> onPickText(text)。
-const KIND_LABEL = { Image: '圖片', Video: '影片', Prompt: '提示詞' }
+const KIND_LABEL = { Image: '圖片', Video: '影片', Prompt: '提示詞', ChatHistory: '聊天紀錄' }
 const MIME = {
   png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
   mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mkv: 'video/x-matroska',
@@ -23,17 +23,32 @@ export default function ResourcesPicker({ dir, kind, onPickFile, onPickText, onC
   const [path, setPath] = useState(dir)
   const [loading, setLoading] = useState(false)
   const [busy, setBusy] = useState('')
+  const [previews, setPreviews] = useState({})
 
   useEffect(() => {
     let cancelled = false
     setLoading(true)
     fetch('/comfy/resources/list?dir=' + encodeURIComponent(dir) + '&sub=' + encodeURIComponent(sub))
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))
-      .then((d) => { if (!cancelled) { setItems(d.items || []); setPath(d.path || dir) } })
+      .then((d) => {
+        if (cancelled) return
+        const its = d.items || []
+        setItems(its)
+        setPath(d.path || dir)
+        setPreviews({})
+        if (kind === 'prompt') {
+          its.filter((x) => x.type === 'file').forEach((f) => {
+            fetch(fileUrl(dir, sub, f.name))
+              .then((r) => r.ok ? r.text() : '')
+              .then((t) => { if (!cancelled) setPreviews((prev) => ({ ...prev, [f.name]: t.slice(0, 100) })) })
+              .catch(() => {})
+          })
+        }
+      })
       .catch(() => { if (!cancelled) setItems([]) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [dir, sub])
+  }, [dir, sub, kind])
 
   async function choose(it) {
     if (it.type === 'dir') { setSub(sub ? sub + '/' + it.name : it.name); return }
@@ -95,7 +110,7 @@ export default function ResourcesPicker({ dir, kind, onPickFile, onPickText, onC
                 ) : kind === 'video' ? (
                   <video className="res-thumb" src={fileUrl(dir, sub, it.name) + '#t=0.1'} muted preload="metadata" playsInline />
                 ) : (
-                  <div className="res-thumb res-thumb-text">¶</div>
+                  <div className={'res-thumb res-thumb-text' + (previews[it.name] ? ' res-thumb-preview' : '')}>{previews[it.name] ? previews[it.name] : '¶'}</div>
                 )}
                 <span className="res-item-name">{busy === it.name ? '載入中…' : it.name}</span>
               </button>

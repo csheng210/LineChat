@@ -246,6 +246,7 @@ export default function ImageGen({ active }) {
   if (active === 'resources') return <ResourcesBrowser />
   if (active === 'queue') return <QueueManager />
   if (active === 'outputs') return <OutputsBrowser />
+  if (active === 'chat') return <ChatPanel />
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo || isFl2v // 圖生影片/首尾圖生影片才顯示秒數
@@ -713,6 +714,161 @@ function OutputsBrowser() {
           </div>
         </div>
       )}
+    </section>
+  )
+}
+
+
+// 模型聊天: 對誝歷史走後端 /comfy/chat, 可存到 Resources/ChatHistory 並從該目錄載入縪續。
+function ChatPanel() {
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [sending, setSending] = useState(false)
+  const [title, setTitle] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [records, setRecords] = useState(null)
+
+  async function send() {
+    const text = input.trim()
+    if (!text || sending) return
+    const next = messages.concat([{ role: 'user', content: text }])
+    setMessages(next)
+    setInput('')
+    setSending(true)
+    setNote('')
+    try {
+      const r = await fetch('/comfy/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: next }) })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setNote('模型回應失敗: ' + (d.detail || r.status)); setSending(false); return }
+      setMessages(next.concat([{ role: 'assistant', content: d.reply || '' }]))
+    } catch (e) {
+      setNote('模型回應失敗: ' + ((e && e.message) || e))
+    }
+    setSending(false)
+  }
+
+  async function saveChat() {
+    if (!messages.length) { setNote('目前沒有對誝可儲存'); return }
+    setSaving(true)
+    setNote('')
+    try {
+      const fd = new FormData()
+      fd.append('title', title)
+      fd.append('messages', JSON.stringify(messages))
+      const r = await fetch('/comfy/chat/save', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setNote('儲存失敗: ' + (d.detail || r.status)); setSaving(false); return }
+      setNote('已儲存: ' + d.name)
+    } catch (e) {
+      setNote('儲存失敗: ' + ((e && e.message) || e))
+    }
+    setSaving(false)
+  }
+
+  function applyText(text) {
+    try {
+      const obj = JSON.parse(text)
+      const msgs = Array.isArray(obj) ? obj : (obj.messages || [])
+      setMessages(msgs)
+      setTitle(obj.title || '')
+      setNote('已載入聊天紀錄')
+      setRecords(null)
+    } catch {
+      setNote('載入失敗: 檔案格式不正確')
+    }
+  }
+
+  async function loadRecords() {
+    setNote('')
+    try {
+      const r = await fetch('/comfy/resources/list?dir=ChatHistory&sub=')
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setNote('載入紀錄清單失敗: ' + (d.detail || r.status)); setRecords([]); return }
+      const files = (d.items || []).filter((x) => x.type === 'file' && x.name.toLowerCase().endsWith('.json'))
+      setRecords(files)
+    } catch (e) {
+      setNote('載入紀錄清單失敗: ' + ((e && e.message) || e))
+      setRecords([])
+    }
+  }
+
+  function toggleRecords() {
+    if (records) { setRecords(null); return }
+    loadRecords()
+  }
+
+  async function loadRec(name) {
+    try {
+      const r = await fetch('/comfy/resources/file?dir=ChatHistory&sub=&name=' + encodeURIComponent(name))
+      if (!r.ok) { setNote('載入失敗: HTTP ' + r.status); return }
+      applyText(await r.text())
+    } catch (e) {
+      setNote('載入失敗: ' + ((e && e.message) || e))
+    }
+  }
+
+  async function renameRec(name) {
+    const base = name.replace(/\.json$/i, '')
+    const nn = window.prompt('請輸入新檔名（不用附 .json）', base)
+    if (nn === null) return
+    const trimmed = nn.trim()
+    if (!trimmed) { setNote('新檔名不可為空'); return }
+    try {
+      const fd = new FormData()
+      fd.append('name', name)
+      fd.append('new_name', trimmed)
+      const r = await fetch('/comfy/chat/rename', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setNote('更名失敗: ' + (d.detail || r.status)); return }
+      setNote('已更名為: ' + d.name)
+      loadRecords()
+    } catch (e) {
+      setNote('更名失敗: ' + ((e && e.message) || e))
+    }
+  }
+
+  function onKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }
+  }
+
+  return (
+    <section className="gen-chat gen-outputs-page">
+      <header className="gen-chat-header">
+        <strong>模型聊天</strong>
+        <input className="gen-chat-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="對誝標顈（儲存用）" />
+        <button type="button" className="gen-chat-btn" onClick={() => { setMessages([]); setTitle(''); setNote('') }}>新對誝</button>
+        <button type="button" className="gen-chat-btn" onClick={toggleRecords}>{records ? '關閉清單' : '聊天紀錄'}</button>
+        <button type="button" className="gen-chat-btn primary" onClick={saveChat} disabled={saving}>{saving ? '儲存中…' : '儲存紀錄'}</button>
+      </header>
+      {note && <div className="gen-chat-note">{note}</div>}
+      {records && (
+        <div className="gen-chat-records">
+          {records.length === 0 && <p className="gen-hint">目前沒有已儲存的聊天紀錄。</p>}
+          {records.map((f) => (
+            <div key={f.name} className="gen-chat-rec">
+              <span className="gen-chat-rec-name">{f.name}</span>
+              <span className="gen-chat-rec-meta">{f.size ? (f.size / 1024).toFixed(1) + ' KB' : ''}</span>
+              <button type="button" className="gen-chat-rec-btn" onClick={() => loadRec(f.name)}>載入</button>
+              <button type="button" className="gen-chat-rec-btn" onClick={() => renameRec(f.name)}>更名</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="gen-chat-log">
+        {!messages.length && <p className="gen-hint">輸入文字開始與模型對誝，可儲存並在之後載入縪續。</p>}
+        {messages.map((m, i) => (
+          <div key={i} className={'gen-chat-msg gen-chat-' + m.role}>
+            <span className="gen-chat-role">{m.role === 'user' ? '你' : '模型'}</span>
+            <span className="gen-chat-text">{m.content}</span>
+          </div>
+        ))}
+        {sending && <div className="gen-chat-msg gen-chat-assistant"><span className="gen-chat-role">模型</span><span className="gen-chat-text gen-chat-typing">思考中…</span></div>}
+      </div>
+      <div className="gen-chat-inputbar">
+        <textarea className="gen-chat-input" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onKey} rows={3} placeholder="輸入要問備模型的內容（Enter 送出，Shift+Enter 換行）" />
+        <button type="button" className="gen-chat-send" onClick={send} disabled={sending || !input.trim()}>{sending ? '傳送中…' : '傳送'}</button>
+      </div>
     </section>
   )
 }
