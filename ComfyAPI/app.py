@@ -330,6 +330,7 @@ class ChatRequest(BaseModel):
     base_url: Optional[str] = None
     model: Optional[str] = None
     api_key: Optional[str] = None
+    enable_thinking: Optional[bool] = None
 
 
 @app.post("/chat")
@@ -353,6 +354,8 @@ def chat_completions(req: ChatRequest):
     headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
     payload = {"model": model, "messages": msgs, "temperature": req.temperature,
                "max_tokens": req.max_tokens, "stream": False}
+    if req.enable_thinking is not None:
+        payload["chat_template_kwargs"] = {"enable_thinking": bool(req.enable_thinking)}
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=120)
     except requests.RequestException as e:
@@ -632,6 +635,7 @@ def video2prompt(
     base_url: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
+    enable_thinking: Optional[bool] = Form(None),
 ):
     data = video.file.read()
     if not data:
@@ -641,7 +645,7 @@ def video2prompt(
         prompt = rvp.generate(
             video_path=path, target=target, max_frames=max_frames, max_side=max_side,
             temperature=temperature, max_tokens=max_tokens, extra=extra,
-            base_url=base_url, model=model, api_key=api_key, log=lambda *_: None)
+            base_url=base_url, model=model, api_key=api_key, enable_thinking=enable_thinking, log=lambda *_: None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -662,6 +666,7 @@ def image2prompt(
     base_url: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
+    enable_thinking: Optional[bool] = Form(None),
 ):
     data = image.file.read()
     if not data:
@@ -671,7 +676,7 @@ def image2prompt(
         prompt = rip.generate(
             image_path=path, target=target, max_side=max_side, temperature=temperature,
             max_tokens=max_tokens, extra=extra, base_url=base_url, model=model,
-            api_key=api_key, log=lambda *_: None)
+            api_key=api_key, enable_thinking=enable_thinking, log=lambda *_: None)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
@@ -1252,6 +1257,7 @@ def job_image2prompt(
     base_url: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
+    enable_thinking: Optional[bool] = Form(None),
 ):
     data = image.file.read()
     if not data:
@@ -1264,7 +1270,7 @@ def job_image2prompt(
             return rip.generate(
                 image_path=path, target=target, max_side=max_side, temperature=temperature,
                 max_tokens=max_tokens, extra=extra, base_url=base_url, model=model,
-                api_key=api_key, log=lambda *_: None,
+                api_key=api_key, enable_thinking=enable_thinking, log=lambda *_: None,
                 progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
         finally:
             try:
@@ -1288,6 +1294,7 @@ def job_video2prompt(
     base_url: Optional[str] = Form(None),
     model: Optional[str] = Form(None),
     api_key: Optional[str] = Form(None),
+    enable_thinking: Optional[bool] = Form(None),
 ):
     data = video.file.read()
     if not data:
@@ -1300,7 +1307,7 @@ def job_video2prompt(
             return rvp.generate(
                 video_path=path, target=target, max_frames=max_frames, max_side=max_side,
                 temperature=temperature, max_tokens=max_tokens, extra=extra, base_url=base_url,
-                model=model, api_key=api_key, log=lambda *_: None,
+                model=model, api_key=api_key, enable_thinking=enable_thinking, log=lambda *_: None,
                 progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
         finally:
             try:

@@ -107,7 +107,7 @@ export default function ImageGen({ active }) {
   const form = snap.forms[active] || DEFAULT_FORM
   const job = snap.jobs[active] || EMPTY_JOB
 
-  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target, vtpModel } = form
+  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target, vtpModel, vtpThink } = form
   const { busy, progress, phase, cancelling, stopped, error, result } = job
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
@@ -195,6 +195,7 @@ export default function ImageGen({ active }) {
         fd.append('base_url', vtp.base_url)
         fd.append('api_key', vtp.api_key)
       }
+      fd.append('enable_thinking', vtpThink ? 'true' : 'false')
       const isVid = image1.type && image1.type.startsWith('video/')
       if (isVid) {
         fd.append('video', image1)
@@ -351,6 +352,13 @@ export default function ImageGen({ active }) {
               </select>
             </label>
             )}
+            <label className="gen-field">
+              <span className="gen-field-label">思考模式 (think)</span>
+              <select className="gen-textarea" value={vtpThink ? "1" : "0"} onChange={(e) => setForm(active, { vtpThink: e.target.value === "1" })}>
+                <option value="1">啟用（模型先思考再回答）</option>
+                <option value="0">關閉（直接回答, 不輸出思考）</option>
+              </select>
+            </label>
             <label className="gen-field">
               <span className="gen-field-label">目標模型（選填, 讓提示詞風格貼近該模型）</span>
               <select className="gen-textarea" value={target} onChange={(e) => setForm(active, { target: e.target.value })}>
@@ -764,6 +772,7 @@ function ChatPanel() {
   const [saving, setSaving] = useState(false)
   const [records, setRecords] = useState(null)
   const [model, setModel] = useState(VTP_MODELS[0]?.id || '') // 聊天用的模型(對應 base_url/api_key), 預設第一項
+  const [think, setThink] = useState(true) // 是否啟用模型的 think(思考)模式
 
   async function send() {
     const text = input.trim()
@@ -775,7 +784,7 @@ function ChatPanel() {
     setNote('')
     try {
       const vtp = VTP_MODELS.find((m) => m.id === model) || VTP_MODELS[0]
-      const body = vtp ? { messages: next, model: vtp.id, base_url: vtp.base_url, api_key: vtp.api_key } : { messages: next }
+      const body = vtp ? { messages: next, model: vtp.id, base_url: vtp.base_url, api_key: vtp.api_key, enable_thinking: think } : { messages: next, enable_thinking: think }
       const r = await fetch('/comfy/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
       const d = await r.json().catch(() => ({}))
       if (!r.ok) { setNote('模型回應失敗: ' + (d.detail || r.status)); setSending(false); return }
@@ -882,6 +891,10 @@ function ChatPanel() {
             ))}
           </select>
         )}
+        <label className="gen-chat-title" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input type="checkbox" checked={think} onChange={(e) => setThink(e.target.checked)} />
+          思考模式(think)
+        </label>
         <input className="gen-chat-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="對話標題（儲存用）" />
         <button type="button" className="gen-chat-btn" onClick={() => { setMessages([]); setTitle(''); setNote('') }}>新對話</button>
         <button type="button" className="gen-chat-btn" onClick={toggleRecords}>{records ? '關閉清單' : '聊天紀錄'}</button>

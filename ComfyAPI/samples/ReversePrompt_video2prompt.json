@@ -44,7 +44,8 @@
       "image": [
         "16",
         0
-      ]
+      ],
+      "enable_thinking": true
     },
     "class_type": "ReversePrompt",
     "_meta": {

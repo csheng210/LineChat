@@ -28,7 +28,8 @@
       "image": [
         "173",
         0
-      ]
+      ],
+      "enable_thinking": true
     },
     "class_type": "ReversePrompt",
     "_meta": {

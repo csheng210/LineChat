@@ -24,6 +24,7 @@ export const DEFAULT_FORM = {
   preview2: '',
   target: '', // 反推提示詞: 目標模型預設(image/video)
   vtpModel: 'qwen3.8-27b-uncensored', // 反推提示詞: 反推用的 VLM 模型(對應 base_url/api_key, 見 ImageGen 的 VTP_MODELS)
+  vtpThink: true, // 反推提示詞: 是否啟用模型的 think(思考)模式
   // 輸入圖/影片的原檔 dataURL 與中繼資料: 供重新整理後還原成 File(圖片可直接還原; 影片超量時退回縮圖預覽)。
   fileData1: '',
   fileData2: '',
@@ -106,6 +107,7 @@ function serializeForm(form) {
     duration: form.duration,
     target: form.target || '',
     vtpModel: form.vtpModel || '',
+    vtpThink: form.vtpThink !== false,
     fileData1: form.fileData1 || '',
     fileData2: form.fileData2 || '',
     fileName1: form.fileName1 || '',

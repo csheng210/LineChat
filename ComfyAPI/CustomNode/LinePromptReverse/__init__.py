@@ -121,11 +121,13 @@ def _build_messages(frames_b64, meta, extra, target):
     return [{"role": "system", "content": system}, {"role": "user", "content": content}]
 
 
-def _call_api(messages, base_url, model, api_key, temperature, max_tokens, timeout, retries):
+def _call_api(messages, base_url, model, api_key, temperature, max_tokens, timeout, retries, enable_thinking=None):
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {"Authorization": "Bearer " + api_key, "Content-Type": "application/json"}
     payload = {"model": model, "messages": messages, "temperature": temperature,
                "max_tokens": max_tokens, "stream": False}
+    if enable_thinking is not None:
+        payload["chat_template_kwargs"] = {"enable_thinking": bool(enable_thinking)}
     last_err = None
     for attempt in range(retries + 1):
         try:
@@ -170,6 +172,7 @@ class ReversePrompt:
                 "timeout": ("INT", {"default": 180, "min": 10, "max": 600, "step": 10}),
                 "retries": ("INT", {"default": 2, "min": 0, "max": 5, "step": 1}),
                 "extra": ("STRING", {"default": "", "multiline": True}),
+                "enable_thinking": ("BOOLEAN", {"default": True}),
             }
         }
 
@@ -180,7 +183,7 @@ class ReversePrompt:
     DESCRIPTION = "反推提示詞：輸入圖片或影片(batch 影格)，輸出可供生圖/生影片模型使用的提示詞。"
 
     def generate(self, image, base_url, model, api_key, target, max_frames, max_side,
-                 jpeg_quality, temperature, max_tokens, timeout, retries, extra):
+                 jpeg_quality, temperature, max_tokens, timeout, retries, extra, enable_thinking=True):
         import torch  # type: ignore[import-not-found]  # ComfyUI ships torch; import locally to avoid import-time hard dep.
         if not isinstance(image, torch.Tensor) or image.ndim < 3:
             raise ValueError("image input is not a ComfyUI IMAGE tensor")
@@ -201,7 +204,7 @@ class ReversePrompt:
         target_key = "" if target == "(none)" else target
         messages = _build_messages(frames_b64, meta, extra, target_key)
         prompt = _call_api(messages, base_url, model, api_key, temperature,
-                           max_tokens, timeout, retries)
+                           max_tokens, timeout, retries, enable_thinking)
         return (prompt,)
 
 

@@ -44,7 +44,7 @@ def build_workflow(video_name, params, wf_path):
 
 def generate(video_path, target: Optional[str] = "", max_frames=None, max_side=None, temperature=None,
              max_tokens=None, extra=None, base_url=None, model=None, api_key=None,
-             workflow=None, output=None, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
+             enable_thinking=None, workflow=None, output=None, log=print, progress_cb=None, cancel_event=None, prompt_id_cb=None):
     """影片反推提示詞。回傳提示詞字串；若給 output 則同時存檔。"""
     wf_path = Path(workflow) if workflow else DEFAULT_WORKFLOW
     if not wf_path.is_file():
@@ -57,6 +57,7 @@ def generate(video_path, target: Optional[str] = "", max_frames=None, max_side=N
         "base_url": base_url,
         "model": model,
         "api_key": api_key,
+        "enable_thinking": enable_thinking,
         "target": target,
         "max_frames": max_frames,
         "max_side": max_side,
