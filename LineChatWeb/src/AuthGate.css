@@ -1680,6 +1680,8 @@
   }
   .gen-chat-inputbar {
     position: sticky;
+    flex-direction: column;
+    align-items: stretch;
     bottom: 0;
     z-index: 5;
     background: #f2f2f2;
@@ -1690,5 +1692,9 @@
   }
   .gen-chat-input {
     flex: 1 1 auto;
+    width: 100%;
+  }
+  .gen-chat-send {
+    width: 100%;
   }
 }
