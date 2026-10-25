@@ -49,6 +49,8 @@ export default function ResourcesBrowser() {
   const [ytProgress, setYtProgress] = useState(0)
   const [ytStatus, setYtStatus] = useState('')
   const [ytError, setYtError] = useState('')
+  const [edOpen, setEdOpen] = useState(false)
+  const [edItem, setEdItem] = useState(null)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -314,6 +316,9 @@ export default function ResourcesBrowser() {
                   <button className="res-card-up" title="往上層目錄移動" aria-label="往上層移動" onClick={(e) => { e.stopPropagation(); moveUp(it) }}>↑</button>
                 )}
                 <button className="res-card-del" title="刪除" aria-label="刪除" onClick={(e) => { e.stopPropagation(); delFile(it) }}>✕</button>
+                {it.kind === 'video' && (
+                  <button className="res-card-edit" title="編輯影片" aria-label="編輯影片" onClick={(e) => { e.stopPropagation(); setEdItem(it); setEdOpen(true) }}>✎</button>
+                )}
                 {it.kind === 'image' ? (
                   <img className="res-thumb" src={fileUrl(dir, sub, it.name)} alt={it.name} loading="lazy"
                     onLoad={(e) => { const el = e.currentTarget; const w = el.naturalWidth, h = el.naturalHeight; setMeta((prev) => ({ ...prev, [it.name]: { w, h } })) }} />
@@ -431,6 +436,221 @@ export default function ResourcesBrowser() {
           </div>
         </div>
       )}
+
+      {edOpen && edItem && (
+        <VideoEditor
+          dir={dir}
+          sub={sub}
+          item={edItem}
+          onClose={() => { setEdOpen(false); setEdItem(null) }}
+          onDone={() => { setEdOpen(false); setEdItem(null); refresh() }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+// 影片編輯: 時間擷取(trim) + 框選裁切(crop)。在影片預覽上拖曳/縮放矩形, 送出走 /resources/video-edit 背景任務。
+function VideoEditor({ dir, sub, item, onClose, onDone }) {
+  const url = fileUrl(dir, sub, item.name)
+  const [meta, setMeta] = useState({ w: 0, h: 0, dur: 0 })
+  const [start, setStart] = useState('0')
+  const [end, setEnd] = useState('')
+  const [cropOn, setCropOn] = useState(false)
+  const [box, setBox] = useState({ x: 0.15, y: 0.15, w: 0.7, h: 0.7 })
+  const [jobId, setJobId] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+  const stageRef = useRef(null)
+  const dragRef = useRef(null)
+  const videoRef = useRef(null)
+  const [seek, setSeek] = useState(0)
+
+  function parseTime(t) {
+    t = (t || '').trim()
+    if (!t) return 0
+    const parts = t.split(':')
+    if (parts.length > 3) return NaN
+    let total = 0
+    for (const p of parts) { const n = parseInt(p, 10); if (isNaN(n) || n < 0) return NaN; total = total * 60 + n }
+    return total
+  }
+  function fmtSec(sec) {
+    sec = Math.round(sec)
+    const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), sec2 = sec % 60
+    return h ? h + ':' + String(m).padStart(2, '0') + ':' + String(sec2).padStart(2, '0') : m + ':' + String(sec2).padStart(2, '0')
+  }
+
+  const cropPx = cropOn && meta.w ? {
+    x: Math.round(box.x * meta.w), y: Math.round(box.y * meta.h),
+    w: Math.round(box.w * meta.w), h: Math.round(box.h * meta.h),
+  } : null
+
+  const hasStart = start.trim() !== '' && start.trim() !== '0'
+  const hasEnd = end.trim() !== ''
+  const markStep = hasEnd ? 2 : (hasStart ? 1 : 0)
+  const markLabel = markStep === 2 ? '清除擷取範圍' : (markStep === 1 ? '設為結束' : '設為開始')
+  function markPoint() {
+    const t = fmtSec(seek)
+    if (markStep === 2) { setStart('0'); setEnd(''); return }
+    if (markStep === 0) { setStart(t); return }
+    const sv = parseTime(start), ev = parseTime(t)
+    if (ev > sv) { setEnd(t) } else { setStart(t); setEnd(start) }
+  }
+
+  function startDrag(e, handle) {
+    e.preventDefault(); e.stopPropagation()
+    dragRef.current = { handle, startX: e.clientX, startY: e.clientY, box: { ...box } }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+  function onMove(e) {
+    const d = dragRef.current
+    if (!d || !stageRef.current) return
+    const rect = stageRef.current.getBoundingClientRect()
+    const dxN = (e.clientX - d.startX) / rect.width
+    const dyN = (e.clientY - d.startY) / rect.height
+    const min = 0.05
+    const b = { ...d.box }
+    const H = d.handle
+    if (H === 'move') {
+      b.x = Math.max(0, Math.min(1 - b.w, d.box.x + dxN))
+      b.y = Math.max(0, Math.min(1 - b.h, d.box.y + dyN))
+    } else {
+      if (H.includes('w')) { const nx = Math.max(0, Math.min(d.box.x + d.box.w - min, d.box.x + dxN)); b.x = nx; b.w = d.box.x + d.box.w - nx }
+      if (H.includes('e')) { b.w = Math.max(min, Math.min(1 - d.box.x, d.box.w + dxN)) }
+      if (H.includes('n')) { const ny = Math.max(0, Math.min(d.box.y + d.box.h - min, d.box.y + dyN)); b.y = ny; b.h = d.box.y + d.box.h - ny }
+      if (H.includes('s')) { b.h = Math.max(min, Math.min(1 - d.box.y, d.box.h + dyN)) }
+    }
+    setBox(b)
+  }
+  function onUp() {
+    dragRef.current = null
+    window.removeEventListener('pointermove', onMove)
+    window.removeEventListener('pointerup', onUp)
+  }
+
+  async function submit() {
+    setError('')
+    const sv = parseTime(start), ev = end.trim() ? parseTime(end) : (meta.dur || 0)
+    if (isNaN(sv) || isNaN(ev)) { setStatus('error'); setError('時間格式錯誤'); return }
+    if (!cropOn && !end.trim()) { setStatus('error'); setError('請輸入結束時間, 或勾選框選擷取'); return }
+    if (ev <= sv) { setStatus('error'); setError('結束時間需晚於起始時間'); return }
+    setStatus('running'); setProgress(0)
+    const fd = new FormData()
+    fd.append('dir', dir); fd.append('sub', sub); fd.append('name', item.name)
+    fd.append('start', start.trim() || '0')
+    fd.append('end', end.trim())
+    if (cropOn && cropPx) { fd.append('x', cropPx.x); fd.append('y', cropPx.y); fd.append('w', cropPx.w); fd.append('h', cropPx.h) }
+    try {
+      const r = await fetch('/comfy/resources/video-edit', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id)
+    } catch (e) { setStatus('error'); setError('請求失敗') }
+  }
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') { onDone() }
+        else if (d.status === 'error') { setStatus('error'); setError(d.error || '處理失敗'); setJobId('') }
+        else if (d.status === 'cancelled') { setStatus('cancelled'); setJobId('') }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  const busy = !!jobId
+  const aspect = meta.w && meta.h ? (meta.w / meta.h) : 16 / 9
+
+  return (
+    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
+      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
+        <div className="res-modal-head">
+          <span className="res-modal-title">編輯影片</span>
+          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '處理中…' : '擷取'}</button>
+          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
+        </div>
+        <div className="res-editor-body">
+          <div className="ed-stage" ref={stageRef} style={{ aspectRatio: String(aspect) }}>
+            <video className="ed-video" ref={videoRef} src={url} controls playsInline preload="metadata" muted
+              onLoadedMetadata={(e) => { const el = e.currentTarget; setMeta({ w: el.videoWidth, h: el.videoHeight, dur: el.duration || 0 }) }}
+              onTimeUpdate={(e) => setSeek(e.currentTarget.currentTime)} />
+            {cropOn && (
+              <Fragment>
+                <div className="ed-mask" style={{ left: 0, top: 0, width: '100%', height: (box.y * 100) + '%' }} />
+                <div className="ed-mask" style={{ left: 0, top: ((box.y + box.h) * 100) + '%', width: '100%', height: ((1 - box.y - box.h) * 100) + '%' }} />
+                <div className="ed-mask" style={{ left: 0, top: (box.y * 100) + '%', width: (box.x * 100) + '%', height: (box.h * 100) + '%' }} />
+                <div className="ed-mask" style={{ left: ((box.x + box.w) * 100) + '%', top: (box.y * 100) + '%', width: ((1 - box.x - box.w) * 100) + '%', height: (box.h * 100) + '%' }} />
+                <div className="ed-crop" style={{ left: (box.x * 100) + '%', top: (box.y * 100) + '%', width: (box.w * 100) + '%', height: (box.h * 100) + '%' }}
+                  onPointerDown={(e) => startDrag(e, 'move')}>
+                  <div className="ed-handle nw" onPointerDown={(e) => startDrag(e, 'nw')} />
+                  <div className="ed-handle ne" onPointerDown={(e) => startDrag(e, 'ne')} />
+                  <div className="ed-handle sw" onPointerDown={(e) => startDrag(e, 'sw')} />
+                  <div className="ed-handle se" onPointerDown={(e) => startDrag(e, 'se')} />
+                </div>
+              </Fragment>
+            )}
+          </div>
+
+          <div className="ed-row">
+            <label className="res-prompt-label">起始時間
+              <input className="res-prompt-input" value={start} onChange={(e) => setStart(e.target.value)} placeholder="0" disabled={busy} />
+            </label>
+            <label className="res-prompt-label">結束時間
+              <input className="res-prompt-input" value={end} onChange={(e) => setEnd(e.target.value)} placeholder={meta.dur ? fmtSec(meta.dur) : '整段'} disabled={busy} />
+            </label>
+          </div>
+          <p className="gen-hint">時間可用 90 / 1:00 / 1:00:30。結束留空＝到影片結尾{meta.dur ? '（' + fmtSec(meta.dur) + '）' : ''}。</p>
+
+          <div className="ed-scrub">
+            <button className="res-tool-btn ed-mark-btn" onClick={markPoint} disabled={busy || !meta.dur}>{markLabel}</button>
+            <input className="ed-slider" type="range" min="0" max={meta.dur || 0} step="0.1" value={seek}
+              disabled={busy || !meta.dur}
+              onChange={(e) => { const v = parseFloat(e.target.value); setSeek(v); if (videoRef.current) videoRef.current.currentTime = v }} />
+            <span className="ed-seek-time">{fmtSec(seek)}</span>
+          </div>
+          {meta.dur > 0 && (
+            <div className="ed-band">
+              {hasStart && hasEnd && (() => { const sv = parseTime(start); const ev = parseTime(end); const l = Math.max(0, sv / meta.dur * 100); const w = Math.max(0, (ev - sv) / meta.dur * 100); return <div className="ed-band-fill" style={{ left: l + '%', width: w + '%' }} /> })()}
+              {hasStart && <div className="ed-band-mark" style={{ left: (parseTime(start) / meta.dur * 100) + '%' }} title="開始" />}
+              {hasEnd && <div className="ed-band-mark end" style={{ left: (parseTime(end) / meta.dur * 100) + '%' }} title="結束" />}
+            </div>
+          )}
+
+          <label className="ed-crop-toggle">
+            <input type="checkbox" checked={cropOn} onChange={(e) => setCropOn(e.target.checked)} disabled={busy} />
+            框選擷取（只保留框內畫面）
+          </label>
+          {cropOn && cropPx && (
+            <p className="ed-crop-readout">裁切：{cropPx.w}×{cropPx.h} @ ({cropPx.x}, {cropPx.y}) px{meta.w ? ' · 來源 ' + meta.w + '×' + meta.h : ''}</p>
+          )}
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+
+          <div className="res-prompt-actions">
+            <button className="res-tool-btn" onClick={onClose} disabled={busy}>取消</button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

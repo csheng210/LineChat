@@ -79,6 +79,7 @@ import run_upscale_qwen
 import run_video2prompt as rvp
 import run_image2prompt as rip
 import youtube_clip
+import video_edit
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -423,6 +424,141 @@ def resources_youtube(
 
     job_id = _new_job()
     _start_youtube_job(job_id, url, start_s, end_s, str(target), ffmpeg_location, title, duration)
+    return {"job_id": job_id, "name": target.name}
+
+
+# ---- 影片編輯: 對 Video 目錄既有影片做時間擷取(trim)+框選裁切(crop), 背景任務輸出新檔 ----
+
+def _start_video_edit_job(job_id, src, target, start, end, crop, ffmpeg_location):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            video_edit.edit_video(
+                src, target, start, end, crop,
+                ffmpeg_location=ffmpeg_location,
+                log=lambda *_: None,
+                progress_cb=progress_cb,
+                cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(target).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(target).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-edit")
+def resources_video_edit(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    start: str = Form("0"),
+    end: str = Form(""),
+    x: str = Form(""),
+    y: str = Form(""),
+    w: str = Form(""),
+    h: str = Form(""),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可編輯影片檔案")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法編輯影片")
+
+    info = video_edit.probe_video(src, ffmpeg_location)
+    width, height, duration = info["width"], info["height"], info["duration"]
+    if not width or not height:
+        raise HTTPException(status_code=400, detail="無法解析影片解析度")
+
+    try:
+        start_s = youtube_clip.parse_time(start)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    end_s = youtube_clip.parse_time(end) if (end or "").strip() else int(duration)
+    if duration and end_s > duration:
+        end_s = int(duration)
+    if start_s < 0:
+        raise HTTPException(status_code=400, detail="起始時間不可為負")
+    if duration and start_s >= duration:
+        raise HTTPException(status_code=400, detail=f"起始時間超出影片長度 ({youtube_clip.fmt(int(duration))})")
+
+    crop = None
+    if (x or "").strip() or (y or "").strip() or (w or "").strip() or (h or "").strip():
+        try:
+            cx, cy, cw, ch = int(float(x or 0)), int(float(y or 0)), int(float(w or 0)), int(float(h or 0))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="裁切座標格式錯誤")
+        if cw <= 0 or ch <= 0:
+            raise HTTPException(status_code=400, detail="裁切尺寸需大於 0")
+        cx = max(0, min(cx, width - 2))
+        cy = max(0, min(cy, height - 2))
+        cw = max(2, min(cw, width - cx))
+        ch = max(2, min(ch, height - cy))
+        crop = (cx, cy, cw, ch)
+
+    if end_s <= start_s:
+        raise HTTPException(status_code=400, detail="結束時間需晚於起始時間")
+    if crop is None and end_s >= int(duration) - 0.5:
+        raise HTTPException(status_code=400, detail="未選裁切且未擷取時間段, 無可執行動作")
+
+    stem = src.stem
+    tags = []
+    if end_s < int(duration) - 0.5:
+        tags.append(f"trim{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}")
+    if crop:
+        tags.append(f"crop{video_edit._even(crop[2])}x{video_edit._even(crop[3])}")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_stem = youtube_clip.slug(stem)
+    suffix = ("_" + "_".join(tags)) if tags else ""
+    out_name = f"{ts}_{safe_stem}{suffix}.mp4"
+    target = base / out_name
+    if target.exists():
+        target = base / f"{ts}_{safe_stem}{suffix}_{uuid.uuid4().hex[:4]}.mp4"
+
+    job_id = _new_job()
+    _start_video_edit_job(job_id, str(src), str(target), start_s, end_s, crop, ffmpeg_location)
     return {"job_id": job_id, "name": target.name}
 
 

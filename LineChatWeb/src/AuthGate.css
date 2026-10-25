@@ -363,7 +363,7 @@
     transform: scale(1);
   }
 }
-
+
 
 /* 航班航線選單: 偶數列淡灰底色 */
 .gen-drawer-flights .gen-item:nth-child(4n):not(.active),
@@ -1701,3 +1701,47 @@
 
 .res-yt-times { display: flex; gap: 8px; }
 .res-yt-times .res-prompt-label { flex: 1; }
+
+
+/* ---- 影片編輯 modal ---- */
+.res-editor-box { max-width: 720px; }
+.res-editor-body { display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; }
+.ed-stage { position: relative; width: 100%; max-height: 56vh; background: #000; border-radius: 8px; overflow: hidden; touch-action: none; }
+.ed-video { display: block; width: 100%; height: 100%; object-fit: contain; }
+.ed-mask { position: absolute; background: rgba(0, 0, 0, 0.55); pointer-events: none; }
+.ed-crop { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); cursor: move; touch-action: none; }
+.ed-handle { position: absolute; width: 14px; height: 14px; background: #fff; border: 2px solid #333; border-radius: 3px; z-index: 2; }
+.ed-handle.nw { top: -8px; left: -8px; cursor: nwse-resize; }
+.ed-handle.ne { top: -8px; right: -8px; cursor: nesw-resize; }
+.ed-handle.sw { bottom: -8px; left: -8px; cursor: nesw-resize; }
+.ed-handle.se { bottom: -8px; right: -8px; cursor: nwse-resize; }
+.ed-row { display: flex; gap: 8px; }
+.ed-row .res-prompt-label { flex: 1; }
+.ed-crop-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #1c7a3e; cursor: pointer; }
+.ed-crop-readout { font-size: 12px; color: #5b6b61; margin: 0; }
+.res-card-edit { position: absolute; top: 6px; right: 58px; width: 22px; height: 22px; line-height: 1; display: flex; align-items: center; justify-content: center; padding: 0; font-size: 13px; color: #1c5a8a; background: #fff; border: 1px solid #c4dcea; border-radius: 6px; cursor: pointer; opacity: 0; transition: opacity .12s; z-index: 2; }
+.res-card:hover .res-card-edit { opacity: 1; }
+.res-card-edit:hover { background: #eaf3f9; border-color: #2b7bb0; }
+@media (max-width: 640px) {
+  .ed-stage { max-height: 42vh; }
+  .ed-row { flex-direction: column; }
+}
+
+
+/* ---- 影片編輯: 時間軸滑軸 + 標記 ---- */
+.ed-scrub { display: flex; align-items: center; gap: 10px; }
+.ed-mark-btn { white-space: nowrap; flex: 0 0 auto; }
+.ed-slider { flex: 1 1 auto; width: auto; height: 6px; accent-color: #06c755; cursor: pointer; }
+.ed-seek-time { flex: 0 0 auto; min-width: 46px; text-align: right; font-size: 12px; color: #1c7a3e; font-variant-numeric: tabular-nums; }
+.ed-band { position: relative; height: 14px; margin-top: 2px; border-radius: 4px; background: #eef4f0; }
+.ed-band-fill { position: absolute; top: 0; bottom: 0; background: rgba(6, 199, 85, 0.35); border-left: 2px solid #06c755; border-right: 2px solid #06c755; }
+.ed-band-mark { position: absolute; top: -2px; width: 2px; height: 18px; background: #1c7a3e; transform: translateX(-1px); }
+.ed-band-mark.end { background: #b42318; }
+@media (max-width: 640px) {
+  .ed-scrub { flex-wrap: wrap; }
+  .ed-mark-btn { order: -1; width: 100%; }
+  .ed-slider { flex: 1 1 auto; }
+}
+
+/* 擷取按鈕放在 title bar 內, 尺寸與關閉鈕協調 */
+.ed-confirm-btn { padding: 4px 12px; font-size: 13px; white-space: nowrap; }
