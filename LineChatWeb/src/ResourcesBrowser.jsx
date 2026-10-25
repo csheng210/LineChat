@@ -41,6 +41,14 @@ export default function ResourcesBrowser() {
   const [promptOpen, setPromptOpen] = useState(false)
   const [pName, setPName] = useState('')
   const [pContent, setPContent] = useState('')
+  const [ytOpen, setYtOpen] = useState(false)
+  const [ytUrl, setYtUrl] = useState('')
+  const [ytStart, setYtStart] = useState('')
+  const [ytEnd, setYtEnd] = useState('')
+  const [ytJobId, setYtJobId] = useState('')
+  const [ytProgress, setYtProgress] = useState(0)
+  const [ytStatus, setYtStatus] = useState('')
+  const [ytError, setYtError] = useState('')
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -158,6 +166,53 @@ export default function ResourcesBrowser() {
     refresh()
   }
 
+  async function startYoutube() {
+    const url = ytUrl.trim()
+    if (!url) { setYtStatus('error'); setYtError('請輸入 YouTube 連結'); return }
+    if (!ytEnd.trim()) { setYtStatus('error'); setYtError('請輸入結束時間'); return }
+    setYtError(''); setYtStatus('running'); setYtProgress(0)
+    const fd = new FormData()
+    fd.append('url', url)
+    fd.append('start', ytStart.trim() || '0')
+    fd.append('end', ytEnd.trim())
+    fd.append('sub', sub)
+    try {
+      const r = await fetch('/comfy/resources/youtube', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setYtStatus('error'); setYtError('失敗: ' + (d.detail || r.status)); return }
+      setYtJobId(d.job_id)
+    } catch (e) {
+      setYtStatus('error'); setYtError('請求失敗')
+    }
+  }
+
+  useEffect(() => {
+    if (!ytJobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(ytJobId))
+        const d = await r.json()
+        if (stopped) return
+        setYtProgress(d.progress || 0)
+        if (d.status === 'done') {
+          setYtOpen(false); setYtJobId(''); setYtUrl(''); setYtStart(''); setYtEnd('')
+          setYtProgress(0); setYtStatus('')
+          refresh()
+        } else if (d.status === 'error') {
+          setYtStatus('error'); setYtError(d.error || '下載失敗'); setYtJobId('')
+        } else if (d.status === 'cancelled') {
+          setYtStatus('cancelled'); setYtJobId('')
+        }
+      } catch (e) {
+        if (!stopped) { setYtStatus('error'); setYtError('輪詢失敗'); setYtJobId('') }
+      }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [ytJobId])
+
   // 麵包屑: path 形如 'Video' 或 'Video/output/sub'
   const dirs = items.filter((it) => it.type === 'dir')
   const files = items.filter((it) => it.type === 'file')
@@ -191,6 +246,16 @@ export default function ResourcesBrowser() {
                         </button>
                       </Fragment>
                     ))}
+                  {dir === 'Video' && (
+                    <button
+                      className="res-tab-add"
+                      title="從 YouTube 下載"
+                      aria-label="YouTube 下載"
+                      onClick={() => { setYtOpen(true); setYtStatus(''); setYtError('') }}
+                    >
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z" /></svg>
+                    </button>
+                  )}
                   <button
                     className="res-tab-add"
                     title={dir === 'Prompt' ? '新增提示詞' : '上傳' + (dir === 'Video' ? '影片' : '圖片')}
@@ -322,6 +387,45 @@ export default function ResourcesBrowser() {
               <div className="res-prompt-actions">
                 <button className="res-tool-btn" onClick={() => setPromptOpen(false)}>取消</button>
                 <button className="res-tool-btn primary" onClick={createPrompt}>建立</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {ytOpen && (
+        <div className="res-modal" onClick={() => { if (!ytJobId) setYtOpen(false) }} role="dialog" aria-modal="true">
+          <div className="res-modal-box res-prompt-box" onClick={(e) => e.stopPropagation()}>
+            <div className="res-modal-head">
+              <span className="res-modal-title">從 YouTube 下載影片</span>
+              <button className="res-modal-close" onClick={() => { if (!ytJobId) setYtOpen(false) }} aria-label="關閉">✕</button>
+            </div>
+            <div className="res-prompt-form">
+              <label className="res-prompt-label">
+                YouTube 連結
+                <input className="res-prompt-input" value={ytUrl} onChange={(e) => setYtUrl(e.target.value)} placeholder="https://www.youtube.com/watch?v=..." autoFocus disabled={!!ytJobId} />
+              </label>
+              <div className="res-yt-times">
+                <label className="res-prompt-label">
+                  起始時間
+                  <input className="res-prompt-input" value={ytStart} onChange={(e) => setYtStart(e.target.value)} placeholder="1:00" disabled={!!ytJobId} />
+                </label>
+                <label className="res-prompt-label">
+                  結束時間
+                  <input className="res-prompt-input" value={ytEnd} onChange={(e) => setYtEnd(e.target.value)} placeholder="1:20" disabled={!!ytJobId} />
+                </label>
+              </div>
+              <p className="gen-hint">時間可用 90 / 1:00 / 1:00:30。抓「1:00 起、長 20 秒」就填起始 1:00、結束 1:20。檔名自動用影片標題＋時間。</p>
+              {ytStatus === 'running' && ytJobId && (
+                <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(ytProgress * 100)}>
+                  <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(ytProgress * 100) + '%' }} /></div>
+                  <span className="gen-progress-pct">{Math.round(ytProgress * 100)}%</span>
+                </div>
+              )}
+              {ytError && <p className="gen-error">{ytError}</p>}
+              {ytStatus === 'cancelled' && <p className="gen-hint">已取消。</p>}
+              <div className="res-prompt-actions">
+                <button className="res-tool-btn" onClick={() => setYtOpen(false)} disabled={!!ytJobId}>取消</button>
+                <button className="res-tool-btn primary" onClick={startYoutube} disabled={!!ytJobId}>{ytJobId ? '下載中…' : '下載'}</button>
               </div>
             </div>
           </div>

@@ -78,6 +78,7 @@ import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
 import run_image2prompt as rip
+import youtube_clip
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -313,6 +314,117 @@ def resources_prompt(dir: str = Form("Prompt"), sub: str = Form(""), name: str =
         raise HTTPException(status_code=409, detail="檔名已存在")
     target.write_text(content, encoding="utf-8")
     return {"ok": True, "name": safe}
+
+# ---- YouTube 時段下載: 前端給連結+起訖時間, 背景任務抓片段存到 Video 目錄 ----
+
+_ALLOWED_YT_HOSTS = ("youtube.com", "youtu.be", "music.youtube.com")
+
+
+def _is_youtube_url(url: str) -> bool:
+    try:
+        u = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    if u.scheme not in ("http", "https"):
+        return False
+    host = (u.hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in _ALLOWED_YT_HOSTS)
+
+
+def _start_youtube_job(job_id, url, start, end, target_path, ffmpeg_location, title, duration):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            youtube_clip.download_clip(
+                url, start, end, target_path,
+                ffmpeg_location=ffmpeg_location,
+                title_hint=title, duration_hint=duration,
+                log=lambda *_: None,
+                progress_cb=progress_cb,
+                cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(target_path).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(target_path).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/youtube")
+def resources_youtube(
+    url: str = Form(...),
+    start: str = Form("0"),
+    end: str = Form(""),
+    sub: str = Form(""),
+):
+    if not _is_youtube_url(url):
+        raise HTTPException(status_code=400, detail="僅接受 YouTube 連結 (youtube.com / youtu.be)")
+    base = _resources_dir_path("Video", sub)
+    try:
+        start_s = youtube_clip.parse_time(start)
+        end_s = youtube_clip.parse_time(end)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if end_s <= start_s:
+        raise HTTPException(status_code=400, detail="結束時間需晚於起始時間")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+
+    # 先同步 probe 取標題/長度, 檔名才能帶標題; 實際下載走背景任務
+    try:
+        info = youtube_clip.probe(url, ffmpeg_location)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"無法讀取影片資訊: {e}")
+    title, duration = info["title"], info["duration"]
+    if duration and start_s >= duration:
+        raise HTTPException(status_code=400, detail=f"起始時間超出影片長度 ({youtube_clip.fmt(duration)})")
+    if duration and end_s > duration:
+        end_s = duration
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe = f"{ts}_{youtube_clip.slug(title)}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}.mp4"
+    target = base / safe
+    if target.exists():
+        target = base / f"{ts}_{youtube_clip.slug(title)}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}_{uuid.uuid4().hex[:4]}.mp4"
+
+    job_id = _new_job()
+    _start_youtube_job(job_id, url, start_s, end_s, str(target), ffmpeg_location, title, duration)
+    return {"job_id": job_id, "name": target.name}
+
 
 # ---- 模型聊天(OpenAI 相容 /chat/completions): 模型資訊由前端選單帶入, 後端不寫死 ----
 

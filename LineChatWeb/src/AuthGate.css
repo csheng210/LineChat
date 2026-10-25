@@ -1698,3 +1698,6 @@
     width: 100%;
   }
 }
+
+.res-yt-times { display: flex; gap: 8px; }
+.res-yt-times .res-prompt-label { flex: 1; }
