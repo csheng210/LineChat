@@ -32,7 +32,8 @@ def _grab_frame(ffmpeg_location, src, t, dst):
 
 
 def extract_scene_frames(video_path, scenes, out_dir, ffmpeg_location,
-                        tail_gap=0.15, log=None, progress_cb=None, cancel_event=None):
+                        tail_gap=0.15, log=None, progress_cb=None, cancel_event=None,
+                        segments=None):
     """對每個場景取頭張(start)與尾張(end-tail_gap)。回傳 [{index,start,end,start_file,end_file}, ...]。"""
     def _log(*a):
         if log:
@@ -64,13 +65,16 @@ def extract_scene_frames(video_path, scenes, out_dir, ffmpeg_location,
         done += 1
         if progress_cb:
             progress_cb(done, total)
-        results.append({
+        entry = {
             "index": i,
             "start": round(start, 2),
             "end": round(end, 2),
             "start_file": start_file,
             "end_file": end_file,
-        })
+        }
+        if segments is not None:
+            entry["caption"] = caption_for_scene(start, end, segments)
+        results.append(entry)
     if progress_cb:
         progress_cb(100, 100)
     _log(f"完成 {len(results)} 段, 共 {len(results) * 2} 張")
@@ -86,3 +90,56 @@ def add_manual_frame(video_path, t, out_dir, ffmpeg_location):
     _grab_frame(ffmpeg_location, Path(video_path), t, out_dir / fname)
     return fname
 
+
+def _parse_srt_ts(ts):
+    """'00:01:02,345' 或 '00:01:02.345' -> 秒(float)。"""
+    ts = ts.strip().replace(",", ".")
+    parts = ts.split(":")
+    try:
+        parts = [float(x) for x in parts]
+    except ValueError:
+        return 0.0
+    if len(parts) == 3:
+        h, m, sec = parts
+    elif len(parts) == 2:
+        h = 0.0
+        m, sec = parts
+    else:
+        return 0.0
+    return h * 3600.0 + m * 60.0 + sec
+
+
+def load_srt_segments(srt_path):
+    """解析 .srt 為 [{start,end,text}, ...](依 start 排序)。"""
+    srt_path = Path(srt_path)
+    raw = srt_path.read_text(encoding="utf-8", errors="replace")
+    raw = raw.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = [b for b in raw.split("\n\n") if b.strip()]
+    segs = []
+    for b in blocks:
+        lines = [ln for ln in b.split("\n")]
+        ti = next((idx for idx, ln in enumerate(lines) if "-->" in ln), None)
+        if ti is None:
+            continue
+        left, right = lines[ti].split("-->", 1)
+        start = _parse_srt_ts(left)
+        end = _parse_srt_ts(right.split("\n")[0])
+        text_lines = [ln.strip() for ln in lines[ti + 1:] if ln.strip()]
+        text = " ".join(text_lines).strip()
+        if not text:
+            continue
+        segs.append({"start": start, "end": end, "text": text})
+    segs.sort(key=lambda x: x["start"])
+    return segs
+
+
+def caption_for_scene(start, end, segments, min_overlap=0.1):
+    """串接與場景 [start,end] 時間重疊的字幕文字(去重、依出現序)。"""
+    out = []
+    for seg in segments:
+        ov = min(end, seg["end"]) - max(start, seg["start"])
+        if ov >= min_overlap:
+            t = seg["text"].strip()
+            if t and t not in out:
+                out.append(t)
+    return " ".join(out).strip()

@@ -7,3 +7,8 @@ opencv-python
 numpy
 imageio-ffmpeg
 yt-dlp
+faster-whisper==1.2.1
+av==13.1.0
+huggingface_hub==0.25.2
+python-pptx
+reportlab

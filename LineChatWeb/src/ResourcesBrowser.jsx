@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
+import { VTP_MODELS } from './ImageGen.jsx'
 
 // 多媒體瀏覽: 瀏覽 ComfyAPI 後端的 Resources 目錄(Video/Image/Prompt)。
 //   經 Vite proxy /comfy/* -> ComfyAPI。清單走 GET /comfy/resources/list?dir=&sub=, 檔案走 /comfy/resources/file?dir=&sub=&name=。
@@ -7,6 +8,7 @@ const TABS = [
   { id: 'Video', label: '影片' },
   { id: 'Image', label: '圖片' },
   { id: 'Prompt', label: '提示詞' },
+  { id: 'Audio', label: '音訊' },
 ]
 
 function fileUrl(dir, sub, name) {
@@ -68,6 +70,10 @@ export default function ResourcesBrowser() {
   const [edItem, setEdItem] = useState(null)
   const [scOpen, setScOpen] = useState(false)
   const [scItem, setScItem] = useState(null)
+  const [trOpen, setTrOpen] = useState(false)
+  const [trItem, setTrItem] = useState(null)
+  const [outOpen, setOutOpen] = useState(false)
+  const [outItem, setOutItem] = useState(null)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -236,7 +242,6 @@ export default function ResourcesBrowser() {
   async function startYoutube() {
     const url = ytUrl.trim()
     if (!url) { setYtStatus('error'); setYtError('請輸入 YouTube 連結'); return }
-    if (!ytEnd.trim()) { setYtStatus('error'); setYtError('請輸入結束時間'); return }
     setYtError(''); setYtStatus('running'); setYtProgress(0)
     const fd = new FormData()
     fd.append('url', url)
@@ -330,7 +335,7 @@ export default function ResourcesBrowser() {
                   )}
                   <button
                     className="res-tab-add"
-                    title={dir === 'Prompt' ? '新增提示詞' : '上傳' + (dir === 'Video' ? '影片' : '圖片')}
+                    title={dir === 'Prompt' ? '新增提示詞' : '上傳' + ({ Video: '影片', Image: '圖片', Audio: '音訊' }[dir] || '檔案')}
                     aria-label="新增"
                     onClick={() => {
                       if (dir === 'Prompt') { setPromptOpen(true); setError('') }
@@ -354,7 +359,7 @@ export default function ResourcesBrowser() {
             ref={fileRef}
             type="file"
             multiple
-            accept={dir === 'Video' ? 'video/*' : 'image/*'}
+            accept={dir === 'Video' ? 'video/*' : dir === 'Audio' ? 'audio/*' : 'image/*'}
             style={{ display: 'none' }}
             onChange={onPickFiles}
           />
@@ -393,6 +398,8 @@ export default function ResourcesBrowser() {
                   <Fragment>
                     <button className="res-card-edit" title="編輯影片" aria-label="編輯影片" onClick={(e) => { e.stopPropagation(); setEdItem(it); setEdOpen(true) }}>📝</button>
                     <button className="res-card-edit res-card-scene" title="場景關鍵畫面" aria-label="場景關鍵畫面" onClick={(e) => { e.stopPropagation(); setScItem(it); setScOpen(true) }}>🎬</button>
+                    <button className="res-card-edit res-card-asr" title="語音轉字幕" aria-label="語音轉字幕" onClick={(e) => { e.stopPropagation(); setTrItem(it); setTrOpen(true) }}>🎙</button>
+                    <button className="res-card-edit res-card-report" title="影片產出" aria-label="影片產出" onClick={(e) => { e.stopPropagation(); setOutItem(it); setOutOpen(true) }}>🎞</button>
                   </Fragment>
                 )}
                 {it.kind === 'image' ? (
@@ -402,7 +409,7 @@ export default function ResourcesBrowser() {
                   <video className="res-thumb" src={fileUrl(dir, sub, it.name) + '#t=0.1'} muted preload="metadata" playsInline
                     onLoadedMetadata={(e) => { const el = e.currentTarget; const w = el.videoWidth, h = el.videoHeight; setMeta((prev) => ({ ...prev, [it.name]: { w, h } })) }} />
                 ) : (
-                  <div className={'res-thumb ' + (m.preview ? 'res-thumb-preview' : 'res-thumb-text')}>{m.preview ? m.preview : (it.kind === 'subtitle' ? '💬' : '¶')}</div>
+                  <div className={'res-thumb ' + (m.preview ? 'res-thumb-preview' : 'res-thumb-text')}>{m.preview ? m.preview : (it.kind === 'subtitle' ? '💬' : it.kind === 'audio' ? '🎵' : it.kind === 'slides' ? '📊' : '¶')}</div>
                 )}
                 <span className="res-item-name">{it.name}</span>
                 <span className="res-item-meta">{[dim, fmtSize(it.size), fmtTime(it.mtime)].filter(Boolean).join(' · ')}</span>
@@ -443,6 +450,17 @@ export default function ResourcesBrowser() {
               )}
               {(sel.kind === 'prompt' || sel.kind === 'subtitle') && (
                 <pre className="res-modal-text">{text}</pre>
+              )}
+              {sel.kind === 'audio' && (
+                <div className="res-modal-audio-wrap">
+                  <audio className="res-modal-audio" controls preload="metadata" src={fileUrl(dir, sub, sel.name)} />
+                </div>
+              )}
+              {sel.kind === 'slides' && (
+                <div className="res-modal-file">
+                  <p className="gen-hint">此檔案類型無法在瀏覽器預覽，可下載開啟：</p>
+                  <a className="res-tool-btn primary" href={fileUrl(dir, sub, sel.name)} download>{'下載 ' + sel.name}</a>
+                </div>
               )}
               {sel.kind === 'other' && (
                 <p className="gen-hint">此檔案類型無法預覽：{sel.name}</p>
@@ -536,7 +554,7 @@ export default function ResourcesBrowser() {
                   <input className="res-prompt-input" value={ytEnd} onChange={(e) => setYtEnd(e.target.value)} placeholder="1:20" disabled={!!ytJobId} />
                 </label>
               </div>
-              <p className="gen-hint">時間可用 90 / 1:00 / 1:00:30。抓「1:00 起、長 20 秒」就填起始 1:00、結束 1:20。檔名自動用影片標題＋時間。</p>
+              <p className="gen-hint">時間可用 90 / 1:00 / 1:00:30。抓「1:00 起、長 20 秒」就填起始 1:00、結束 1:20。結束留空＝整段(從起始到結尾)。檔名自動用影片標題＋時間。</p>
               {ytStatus === 'running' && ytJobId && (
                 <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(ytProgress * 100)}>
                   <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(ytProgress * 100) + '%' }} /></div>
@@ -570,6 +588,25 @@ export default function ResourcesBrowser() {
           sub={sub}
           item={scItem}
           onClose={() => { setScOpen(false); setScItem(null) }}
+          onDone={() => refresh()}
+        />
+      )}
+
+      {trOpen && trItem && (
+        <Transcriber
+          dir={dir}
+          sub={sub}
+          item={trItem}
+          onClose={() => { setTrOpen(false); setTrItem(null) }}
+          onDone={() => refresh()}
+        />
+      )}
+      {outOpen && outItem && (
+        <VideoReport
+          dir={dir}
+          sub={sub}
+          item={outItem}
+          onClose={() => { setOutOpen(false); setOutItem(null) }}
           onDone={() => refresh()}
         />
       )}
@@ -795,6 +832,7 @@ function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
   const [dur, setDur] = useState(0)
   const [manual, setManual] = useState([])
   const [adding, setAdding] = useState(false)
+  const [withSub, setWithSub] = useState(true)
   const videoRef = useRef(null)
 
   const busy = !!jobId
@@ -806,6 +844,7 @@ function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
     fd.append('sub', sub || '')
     fd.append('name', item.name)
     fd.append('threshold', String(threshold))
+    fd.append('with_subtitle', withSub ? '1' : '0')
     try {
       const r = await fetch('/comfy/resources/video-scenes', { method: 'POST', body: fd })
       const d = await r.json().catch(() => ({}))
@@ -879,6 +918,10 @@ function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
               disabled={busy} onChange={(e) => setThreshold(parseInt(e.target.value, 10))} />
           </label>
           <p className="gen-hint">數值越低越敏感(切越多段), 越高越寬鬆。預設 27。每段取頭張與轉場前尾張。</p>
+          <label className="res-sub-toggle">
+            <input type="checkbox" checked={withSub} disabled={busy} onChange={(e) => setWithSub(e.target.checked)} />
+            附字幕標籤 (需先有字幕檔)
+          </label>
 
           <div className="sc-manual">
             <div className="sc-manual-head">手動擷取關鍵畫面</div>
@@ -923,6 +966,7 @@ function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
               {scenes.map((sc) => (
                 <div className="sc-seg" key={sc.index}>
                   <div className="sc-seg-head">第 {sc.index} 段 · {sc.start}s → {sc.end}s</div>
+                  {sc.caption && <div className="sc-seg-caption">{sc.caption}</div>}
                   <div className="sc-seg-imgs">
                     <figure className="sc-fig">
                       <img src={fileUrl(dir, subPath, sc.start_file)} alt={sc.start_file} loading="lazy" />
@@ -947,3 +991,283 @@ function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
   )
 }
 
+// 語音轉字幕: faster-whisper 背景任務, 產出 .srt 沿用現有字幕顯示/開關/刪除。
+function Transcriber({ dir, sub, item, onClose, onDone }) {
+  const [model, setModel] = useState('large-v3')
+  const [language, setLanguage] = useState('')
+  const [jobId, setJobId] = useState('')
+  const [out, setOut] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  const busy = !!jobId
+
+  async function submit() {
+    setError(''); setStatus('running'); setProgress(0); setOut('')
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub || '')
+    fd.append('name', item.name)
+    fd.append('model', model)
+    fd.append('language', language)
+    try {
+      const r = await fetch('/comfy/resources/video-transcribe', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id); setOut(d.out || '')
+    } catch (e) {
+      setStatus('error'); setError('請求失敗')
+    }
+  }
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') {
+          setStatus('done'); setJobId(''); onDone()
+        } else if (d.status === 'error') {
+          setStatus('error'); setError(d.error || '轉錄失敗'); setJobId('')
+        } else if (d.status === 'cancelled') {
+          setStatus('cancelled'); setJobId('')
+        }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  return (
+    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
+      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
+        <div className="res-modal-head">
+          <span className="res-modal-title">語音轉字幕</span>
+          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '轉錄中…' : '開始轉錄'}</button>
+          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
+        </div>
+        <div className="res-editor-body">
+          <p className="gen-hint">{item.name}</p>
+
+          <label className="res-prompt-label">
+            模型 (whisper)
+            <select className="res-select" value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+              <option value="tiny">tiny (最快, 較粗)</option>
+              <option value="base">base (快)</option>
+              <option value="small">small (平衡)</option>
+              <option value="medium">medium (較準, 較慢)</option>
+              <option value="large-v3">large-v3 (最準, CPU 很慢)</option>
+            </select>
+          </label>
+          <p className="gen-hint">越大越準但 CPU 轉錄越慢; 首次使用會下載模型。建議先試 base/small。</p>
+
+          <label className="res-prompt-label">
+            語言
+            <select className="res-select" value={language} disabled={busy} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="">自動偵測</option>
+              <option value="zh">中文</option>
+              <option value="en">英文</option>
+              <option value="ja">日文</option>
+              <option value="ko">韓文</option>
+              <option value="vi">越南文</option>
+            </select>
+          </label>
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+          {status === 'done' && (
+            <p className="gen-hint">完成! 字幕檔 {out} 已產生, 可在列表中開啟字幕開關檢視。</p>
+          )}
+
+          <div className="res-prompt-actions">
+            <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function VideoReport({ dir, sub, item, onClose, onDone }) {
+  const [fmt, setFmt] = useState('summary')
+  const [model, setModel] = useState(VTP_MODELS[0]?.id || '')
+  const [think, setThink] = useState(true)
+  const [target, setTarget] = useState('')
+  const [maxSlides, setMaxSlides] = useState(10)
+  const [vision, setVision] = useState(false)
+  const [jobId, setJobId] = useState('')
+  const [out, setOut] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  const busy = !!jobId
+  const isSlide = fmt === 'pptx' || fmt === 'pdf' || fmt === 'html'
+
+  async function submit() {
+    const vtp = VTP_MODELS.find((m) => m.id === model) || VTP_MODELS[0]
+    if (!vtp) { setError('請先選擇模型'); return }
+    setError(''); setStatus('running'); setProgress(0); setOut('')
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub || '')
+    fd.append('name', item.name)
+    fd.append('fmt', fmt)
+    fd.append('base_url', vtp.base_url)
+    fd.append('model', vtp.id)
+    fd.append('api_key', vtp.api_key)
+    fd.append('target', target)
+    fd.append('enable_thinking', think ? 'true' : 'false')
+    if (isSlide) {
+      fd.append('max_slides', String(maxSlides))
+      fd.append('vision', vision ? '1' : '0')
+    }
+    try {
+      const r = await fetch('/comfy/resources/video-report', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id); setOut(d.out || '')
+    } catch (e) {
+      setStatus('error'); setError('請求失敗')
+    }
+  }
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') {
+          setStatus('done'); setJobId(''); onDone()
+        } else if (d.status === 'error') {
+          setStatus('error'); setError(d.error || '產生失敗'); setJobId('')
+        } else if (d.status === 'cancelled') {
+          setStatus('cancelled'); setJobId('')
+        }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  const fmtLabel = { summary: '摘要', segments: '分段摘要', pptx: '投影片 PPTX', pdf: 'PDF', html: 'HTML 簡報' }[fmt]
+  const outDir = (fmt === 'summary' || fmt === 'segments') ? '提示詞' : '影片'
+
+  return (
+    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
+      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
+        <div className="res-modal-head">
+          <span className="res-modal-title">影片產出</span>
+          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '產生中…' : '開始產生'}</button>
+          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
+        </div>
+        <div className="res-editor-body">
+          <p className="gen-hint">{item.name}</p>
+
+          <label className="res-prompt-label">
+            輸出格式
+            <select className="res-select" value={fmt} disabled={busy} onChange={(e) => setFmt(e.target.value)}>
+              <option value="summary">摘要（文字檔）</option>
+              <option value="segments">分段摘要（文字檔）</option>
+              <option value="pptx">投影片（.pptx）</option>
+              <option value="pdf">PDF（.pdf）</option>
+              <option value="html">HTML 簡報（.html）</option>
+            </select>
+          </label>
+
+          <label className="res-prompt-label">
+            推理模型（要選哪個模型來產生）
+            <select className="res-select" value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+              {VTP_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}（{m.id}）</option>
+              ))}
+            </select>
+          </label>
+
+          <label className="res-prompt-label">
+            思考模式 (think)
+            <select className="res-select" value={think ? '1' : '0'} disabled={busy} onChange={(e) => setThink(e.target.value === '1')}>
+              <option value="1">啟用（模型先思考再回答）</option>
+              <option value="0">關閉（直接回答, 不輸出思考）</option>
+            </select>
+          </label>
+
+          <label className="res-prompt-label">
+            目標模型（選填, 讓內容風格貼近該模型）
+            <select className="res-select" value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">（通用, 不指定）</option>
+              <optgroup label="生圖模型">
+                <option value="qwen-image">Qwen-Image</option>
+                <option value="flux">Flux.1</option>
+                <option value="sd">Stable Diffusion</option>
+                <option value="midjourney">Midjourney</option>
+                <option value="dalle">DALL-E 3</option>
+              </optgroup>
+              <optgroup label="生影片模型">
+                <option value="veo">Veo 3.1</option>
+                <option value="kling">Kling 3.0</option>
+                <option value="runway">Runway Gen-4.5</option>
+                <option value="wan">Wan 2.5</option>
+                <option value="hailuo">Hailuo / MiniMax</option>
+              </optgroup>
+            </select>
+          </label>
+
+          {isSlide && (
+            <Fragment>
+              <label className="res-prompt-label">
+                最大頁數
+                <select className="res-select" value={maxSlides} disabled={busy} onChange={(e) => setMaxSlides(Number(e.target.value))}>
+                  <option value={4}>4 頁</option>
+                  <option value={6}>6 頁</option>
+                  <option value={10}>10 頁</option>
+                  <option value={15}>15 頁</option>
+                  <option value={20}>20 頁</option>
+                </select>
+              </label>
+              <label className="res-sub-toggle">
+                <input type="checkbox" checked={vision} disabled={busy} onChange={(e) => setVision(e.target.checked)} />
+                辨識圖片內容（選配，較慢）
+              </label>
+            </Fragment>
+          )}
+
+          <p className="gen-hint">依字幕檔產生{fmtLabel}（無字幕會先做語音辨識{isSlide ? '，並擷取場景圖當素材' : ''}），結果存到「{outDir}」目錄。</p>
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+          {status === 'done' && (
+            <p className="gen-hint">完成! {fmtLabel} {out} 已產生，可在「{outDir}」分頁開啟。</p>
+          )}
+
+          <div className="res-prompt-actions">
+            <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}

@@ -233,7 +233,8 @@ def download_clip(url, start, end, out_path, ffmpeg_location=None,
         raise ValueError("起始時間不可為負")
     if duration and start >= duration:
         raise ValueError(f"起始時間超出影片長度 ({fmt(duration)})")
-    if end <= start:
+    full = bool(duration) and start <= 0 and end >= duration
+    if not full and end <= start:
         raise ValueError("結束時間需晚於起始時間")
     if duration and end > duration:
         end = duration  # 收尾自動對齊影片結尾
@@ -282,7 +283,11 @@ def download_clip(url, start, end, out_path, ffmpeg_location=None,
         if produced is None:
             raise RuntimeError("下載完成但找不到輸出檔案")
 
-        _log(f"剪輯片段: [{fmt(start)}-{fmt(end)}]")
+        # 一律重編碼為 H.264/AAC, 確保瀏覽器可播放(YouTube 常為 AV1/VP9 + Opus)
+        if full:
+            _log("整段下載(轉碼為 H.264/AAC 以利播放)")
+        else:
+            _log(f"剪輯片段: [{fmt(start)}-{fmt(end)}]")
         if progress_cb:
             progress_cb(92, 100)
         cut_path = tmp_dir / "clip.mp4"

@@ -82,6 +82,10 @@ import run_image2prompt as rip
 import youtube_clip
 import video_edit
 import video_scene
+import video_transcribe
+import video_slides
+import video_summary
+import video_report
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -172,8 +176,9 @@ def health():
 
 # ---- 多媒體瀏覽(Resources): 瀏覽 LineChatWeb/Resources 下的 Video/Image/Prompt ----
 RESOURCES_ROOT = Path(__file__).resolve().parent.parent / "LineChatWeb" / "Resources"
-RESOURCES_DIRS = {"Video", "Image", "Prompt", "ChatHistory"}
+RESOURCES_DIRS = {"Video", "Image", "Prompt", "ChatHistory", "Audio"}
 (RESOURCES_ROOT / "ChatHistory").mkdir(parents=True, exist_ok=True)
+(RESOURCES_ROOT / "Audio").mkdir(parents=True, exist_ok=True)
 
 
 def _save_resource(kind: str, data: bytes, ext: str) -> Optional[str]:
@@ -194,6 +199,10 @@ _MEDIA_TYPES = {
     ".gif": "image/gif", ".bmp": "image/bmp",
     ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json",
     ".srt": "text/plain; charset=utf-8", ".vtt": "text/plain; charset=utf-8",
+    ".wav": "audio/wav", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".flac": "audio/flac",
+    ".ogg": "audio/ogg", ".aac": "audio/aac", ".opus": "audio/ogg",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".ppt": "application/vnd.ms-powerpoint",
 }
 _KIND_BY_EXT = {}
 for _e in (".mp4", ".webm", ".mov", ".mkv"):
@@ -204,6 +213,10 @@ for _e in (".txt", ".md", ".json"):
     _KIND_BY_EXT[_e] = "prompt"
 for _e in (".srt", ".vtt"):
     _KIND_BY_EXT[_e] = "subtitle"
+for _e in (".wav", ".mp3", ".m4a", ".flac", ".ogg", ".aac", ".opus"):
+    _KIND_BY_EXT[_e] = "audio"
+for _e in (".pptx", ".ppt"):
+    _KIND_BY_EXT[_e] = "slides"
 
 
 def _resources_dir_path(dir_name: str, sub: str = "") -> Path:
@@ -277,7 +290,7 @@ def resources_subtitle(dir: str = Query(...), name: str = Query(...), sub: str =
     return PlainTextResponse(vtt, media_type="text/vtt; charset=utf-8")
 
 
-_KIND_DIR = {"Video": "video", "Image": "image", "Prompt": "prompt"}
+_KIND_DIR = {"Video": "video", "Image": "image", "Prompt": "prompt", "Audio": "audio"}
 
 @app.post("/resources/upload")
 async def resources_upload(dir: str = Form(...), sub: str = Form(""), files: list[UploadFile] = File(...)):
@@ -505,12 +518,14 @@ def resources_youtube(
     if not _is_youtube_url(url):
         raise HTTPException(status_code=400, detail="僅接受 YouTube 連結 (youtube.com / youtu.be)")
     base = _resources_dir_path("Video", sub)
+    end_raw = (end or "").strip()
+    full = (end_raw == "")
     try:
         start_s = youtube_clip.parse_time(start)
-        end_s = youtube_clip.parse_time(end)
+        end_s = 0 if full else youtube_clip.parse_time(end_raw)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if end_s <= start_s:
+    if not full and end_s <= start_s:
         raise HTTPException(status_code=400, detail="結束時間需晚於起始時間")
 
     ffmpeg_location = None
@@ -528,14 +543,24 @@ def resources_youtube(
     title, duration = info["title"], info["duration"]
     if duration and start_s >= duration:
         raise HTTPException(status_code=400, detail=f"起始時間超出影片長度 ({youtube_clip.fmt(duration)})")
-    if duration and end_s > duration:
+    if full:
+        end_s = duration
+    elif duration and end_s > duration:
         end_s = duration
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe = f"{ts}_{youtube_clip.slug(title)}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}.mp4"
+    slug = youtube_clip.slug(title)
+    full_name = full and start_s == 0
+    if full_name:
+        safe = f"{ts}_{slug}.mp4"
+    else:
+        safe = f"{ts}_{slug}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}.mp4"
     target = base / safe
     if target.exists():
-        target = base / f"{ts}_{youtube_clip.slug(title)}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}_{uuid.uuid4().hex[:4]}.mp4"
+        if full_name:
+            target = base / f"{ts}_{slug}_{uuid.uuid4().hex[:4]}.mp4"
+        else:
+            target = base / f"{ts}_{slug}_{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}_{uuid.uuid4().hex[:4]}.mp4"
 
     job_id = _new_job()
     _start_youtube_job(job_id, url, start_s, end_s, str(target), ffmpeg_location, title, duration)
@@ -678,7 +703,7 @@ def resources_video_edit(
 
 
 
-def _start_video_scene_job(job_id, src, out_dir, threshold, ffmpeg_location):
+def _start_video_scene_job(job_id, src, out_dir, threshold, ffmpeg_location, with_subtitle=False):
     with JOBS_LOCK:
         cancel_event = JOBS[job_id]["cancel_event"]
 
@@ -699,9 +724,20 @@ def _start_video_scene_job(job_id, src, out_dir, threshold, ffmpeg_location):
             scenes = video_scene.detect_scenes(src, threshold=threshold)
             if not scenes:
                 raise RuntimeError("未偵測到任何場景(可調低 threshold 再試)")
+            segments = None
+            if with_subtitle:
+                sp = Path(src).with_suffix(".srt")
+                if not sp.is_file():
+                    sp = Path(src).with_name(Path(src).stem + "_asr.srt")
+                if sp.is_file():
+                    try:
+                        segments = video_scene.load_srt_segments(str(sp))
+                    except Exception:
+                        segments = None
             results = video_scene.extract_scene_frames(
                 src, scenes, out_dir, ffmpeg_location=ffmpeg_location,
                 log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+                segments=segments,
             )
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
@@ -730,6 +766,7 @@ def resources_video_scenes(
     sub: str = Form(""),
     name: str = Form(...),
     threshold: str = Form("27"),
+    with_subtitle: str = Form("0"),
 ):
     base = _resources_dir_path(dir, sub)
     safe = Path(name).name
@@ -762,7 +799,7 @@ def resources_video_scenes(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     job_id = _new_job()
-    _start_video_scene_job(job_id, str(src), str(out_dir), thr, ffmpeg_location)
+    _start_video_scene_job(job_id, str(src), str(out_dir), thr, ffmpeg_location, with_subtitle=(with_subtitle in ("1", "true", "True")))
     return {"job_id": job_id, "out_dir": out_dir.name}
 
 
@@ -813,6 +850,398 @@ def resources_video_scenes_add(
     if not (od / fname).is_file():
         raise HTTPException(status_code=500, detail="擷取影格失敗")
     return {"ok": True, "out_dir": od.name, "file": fname, "time": round(t, 2)}
+
+
+def _start_video_transcribe_job(job_id, src, out_srt, ffmpeg_location, model_size, language):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            res = video_transcribe.transcribe(
+                src, out_srt, ffmpeg_location,
+                model_size=model_size, language=language,
+                log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["subtitle"] = Path(out_srt).name
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(out_srt).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(out_srt).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-transcribe")
+def resources_video_transcribe(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    model: str = Form("large-v3"),
+    language: str = Form(""),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可轉錄影片檔案")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法擷取音軌")
+
+    allowed_models = {"tiny", "base", "small", "medium", "large-v1", "large-v2", "large-v3", "large"}
+    model_size = model if model in allowed_models else "large-v3"
+    lang = (language or "").strip() or None
+
+    out_srt = src.with_suffix(".srt")
+    if out_srt.exists():
+        out_srt = base / (src.stem + "_asr.srt")
+
+    job_id = _new_job()
+    _start_video_transcribe_job(job_id, str(src), str(out_srt), ffmpeg_location, model_size, lang)
+    return {"job_id": job_id, "out": out_srt.name}
+
+
+def _start_video_slides_job(job_id, src, out_pptx, base, ffmpeg_location,
+                            base_url, model, api_key, language, max_slides, do_vision):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            video_slides.build_slides(
+                src, out_pptx, base, ffmpeg_location, base_url, model, api_key,
+                language=language, max_slides=max_slides, do_vision=do_vision,
+                log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["pptx"] = Path(out_pptx).name
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(out_pptx).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(out_pptx).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-slides")
+def resources_video_slides(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    base_url: str = Form(...),
+    model: str = Form(...),
+    api_key: str = Form(""),
+    language: str = Form(""),
+    max_slides: str = Form("10"),
+    vision: str = Form("0"),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可處理影片檔案")
+    if not (base_url or "").strip() or not (model or "").strip():
+        raise HTTPException(status_code=400, detail="需由前端指定 base_url 與 model")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法處理影片")
+
+    try:
+        n_slides = int(max_slides)
+    except ValueError:
+        n_slides = 10
+    n_slides = max(1, min(30, n_slides))
+    do_vision = (vision or "").strip() in ("1", "true", "True", "yes")
+    lang = (language or "").strip() or None
+
+    out_pptx = base / (src.stem + ".pptx")
+    if out_pptx.exists():
+        out_pptx = base / (src.stem + "_" + uuid.uuid4().hex[:4] + ".pptx")
+
+    job_id = _new_job()
+    _start_video_slides_job(job_id, str(src), str(out_pptx), str(base), ffmpeg_location,
+                            base_url.strip(), model.strip(), (api_key or "").strip(),
+                            lang, n_slides, do_vision)
+    return {"job_id": job_id, "out": out_pptx.name}
+
+
+def _start_video_summary_job(job_id, src, out_txt, base, base_url, model, api_key,
+                             target, enable_thinking, language):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            video_summary.summarize(
+                src, out_txt, base, base_url, model, api_key,
+                target=target, enable_thinking=enable_thinking, language=language,
+                log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["summary"] = Path(out_txt).name
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(out_txt).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(out_txt).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-summary")
+def resources_video_summary(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    base_url: str = Form(...),
+    model: str = Form(...),
+    api_key: str = Form(""),
+    target: str = Form(""),
+    enable_thinking: str = Form("false"),
+    language: str = Form(""),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可處理影片檔案")
+    if not (base_url or "").strip() or not (model or "").strip():
+        raise HTTPException(status_code=400, detail="需由前端指定 base_url 與 model")
+
+    thinking = (enable_thinking or "").strip().lower() in ("1", "true", "yes", "on")
+    lang = (language or "").strip() or None
+    tgt = (target or "").strip() or None
+
+    prompt_dir = RESOURCES_ROOT / "Prompt"
+    prompt_dir.mkdir(parents=True, exist_ok=True)
+    out_txt = prompt_dir / (src.stem + "_摘要.txt")
+    if out_txt.exists():
+        out_txt = prompt_dir / (src.stem + "_摘要_" + uuid.uuid4().hex[:4] + ".txt")
+
+    job_id = _new_job()
+    _start_video_summary_job(job_id, str(src), str(out_txt), str(base),
+                             base_url.strip(), model.strip(), (api_key or "").strip(),
+                             tgt, thinking, lang)
+    return {"job_id": job_id, "out": out_txt.name}
+
+
+def _start_video_report_job(job_id, src, out_path, base, fmt, ffmpeg_location,
+                            base_url, model, api_key, language, max_slides, do_vision,
+                            target, enable_thinking):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            video_report.generate(
+                src, out_path, base, fmt, ffmpeg_location, base_url, model, api_key,
+                language=language, max_slides=max_slides, do_vision=do_vision,
+                target=target, enable_thinking=enable_thinking,
+                log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["out"] = Path(out_path).name
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(out_path).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(out_path).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-report")
+def resources_video_report(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    fmt: str = Form("summary"),
+    base_url: str = Form(...),
+    model: str = Form(...),
+    api_key: str = Form(""),
+    language: str = Form(""),
+    max_slides: str = Form("10"),
+    vision: str = Form("0"),
+    target: str = Form(""),
+    enable_thinking: str = Form("false"),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可處理影片檔案")
+    if not (base_url or "").strip() or not (model or "").strip():
+        raise HTTPException(status_code=400, detail="需由前端指定 base_url 與 model")
+
+    fmt = (fmt or "").strip().lower()
+    if fmt not in ("summary", "segments", "pptx", "pdf", "html"):
+        raise HTTPException(status_code=400, detail="格式需為 summary/segments/pptx/pdf/html")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法處理影片")
+
+    try:
+        n_slides = int(max_slides)
+    except ValueError:
+        n_slides = 10
+    n_slides = max(1, min(30, n_slides))
+    do_vision = (vision or "").strip() in ("1", "true", "True", "yes")
+    lang = (language or "").strip() or None
+    tgt = (target or "").strip() or None
+    thinking = (enable_thinking or "").strip().lower() in ("1", "true", "yes", "on")
+
+    if fmt in ("summary", "segments"):
+        out_dir = RESOURCES_ROOT / "Prompt"
+        suffix = "_分段摘要" if fmt == "segments" else "_摘要"
+        ext = ".txt"
+    else:
+        out_dir = base
+        suffix = ""
+        ext = "." + fmt
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / (src.stem + suffix + ext)
+    if out_path.exists():
+        out_path = out_dir / (src.stem + suffix + "_" + uuid.uuid4().hex[:4] + ext)
+
+    job_id = _new_job()
+    _start_video_report_job(job_id, str(src), str(out_path), str(base), fmt, ffmpeg_location,
+                            base_url.strip(), model.strip(), (api_key or "").strip(),
+                            lang, n_slides, do_vision, tgt, thinking)
+    return {"job_id": job_id, "out": out_path.name}
 
 
 # ---- 模型聊天(OpenAI 相容 /chat/completions): 模型資訊由前端選單帶入, 後端不寫死 ----
