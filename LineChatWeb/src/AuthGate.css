@@ -1741,6 +1741,7 @@
 .res-card-edit:hover { background: #eaf3f9; border-color: #2b7bb0; }
 .res-card-asr { left: 58px; }
 .res-card-report { left: 84px; }
+.res-card-audio { left: 110px; }
 .res-select { border: 1px solid #d8d8d8; border-radius: 8px; padding: 6px 8px; font-size: 13px; background: #fff; color: #222; width: 100%; }
 @media (max-width: 640px) {
   .ed-stage { max-height: 42vh; }

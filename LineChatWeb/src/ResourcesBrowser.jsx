@@ -74,6 +74,8 @@ export default function ResourcesBrowser() {
   const [trItem, setTrItem] = useState(null)
   const [outOpen, setOutOpen] = useState(false)
   const [outItem, setOutItem] = useState(null)
+  const [auOpen, setAuOpen] = useState(false)
+  const [auItem, setAuItem] = useState(null)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -400,6 +402,7 @@ export default function ResourcesBrowser() {
                     <button className="res-card-edit res-card-scene" title="場景關鍵畫面" aria-label="場景關鍵畫面" onClick={(e) => { e.stopPropagation(); setScItem(it); setScOpen(true) }}>🎬</button>
                     <button className="res-card-edit res-card-asr" title="語音轉字幕" aria-label="語音轉字幕" onClick={(e) => { e.stopPropagation(); setTrItem(it); setTrOpen(true) }}>🎙</button>
                     <button className="res-card-edit res-card-report" title="影片產出" aria-label="影片產出" onClick={(e) => { e.stopPropagation(); setOutItem(it); setOutOpen(true) }}>🎞</button>
+                    <button className="res-card-edit res-card-audio" title="加入/取代聲音" aria-label="加入/取代聲音" onClick={(e) => { e.stopPropagation(); setAuItem(it); setAuOpen(true) }}>🔊</button>
                   </Fragment>
                 )}
                 {it.kind === 'image' ? (
@@ -610,6 +613,15 @@ export default function ResourcesBrowser() {
           onDone={() => refresh()}
         />
       )}
+      {auOpen && auItem && (
+        <VideoAudio
+          dir={dir}
+          sub={sub}
+          item={auItem}
+          onClose={() => { setAuOpen(false); setAuItem(null) }}
+          onDone={() => refresh()}
+        />
+      )}
     </div>
   )
 }
@@ -657,6 +669,7 @@ function VideoEditor({ dir, sub, item, onClose, onDone }) {
   const markStep = hasEnd ? 2 : (hasStart ? 1 : 0)
   const markLabel = markStep === 2 ? '清除擷取範圍' : (markStep === 1 ? '設為結束' : '設為開始')
   function markPoint() {
+    if (!isFinite(seek) || seek < 0) return
     const t = fmtSec(seek)
     if (markStep === 2) { setStart('0'); setEnd(''); return }
     if (markStep === 0) { setStart(t); return }
@@ -698,10 +711,15 @@ function VideoEditor({ dir, sub, item, onClose, onDone }) {
 
   async function submit() {
     setError('')
-    const sv = parseTime(start), ev = end.trim() ? parseTime(end) : (meta.dur || 0)
-    if (isNaN(sv) || isNaN(ev)) { setStatus('error'); setError('時間格式錯誤'); return }
-    if (!cropOn && !end.trim()) { setStatus('error'); setError('請輸入結束時間, 或勾選框選擷取'); return }
-    if (ev <= sv) { setStatus('error'); setError('結束時間需晚於起始時間'); return }
+    const hasStart = start.trim() !== ''
+    const hasEnd = end.trim() !== ''
+    const sv = hasStart ? parseTime(start) : 0
+    const ev = hasEnd ? parseTime(end) : (meta.dur || 0)
+    if (hasStart && isNaN(sv)) { setStatus('error'); setError('起始時間格式錯誤'); return }
+    if (hasEnd && isNaN(ev)) { setStatus('error'); setError('結束時間格式錯誤'); return }
+    // 時間與框選可各自獨立, 也可合併; 至少要有一項操作
+    if (!cropOn && !hasStart && !hasEnd) { setStatus('error'); setError('請設定時間範圍, 或勾選框選擷取'); return }
+    if ((hasStart || hasEnd) && ev <= sv) { setStatus('error'); setError('結束時間需晚於起始時間'); return }
     setStatus('running'); setProgress(0)
     const fd = new FormData()
     fd.append('dir', dir); fd.append('sub', sub); fd.append('name', item.name)
@@ -748,9 +766,9 @@ function VideoEditor({ dir, sub, item, onClose, onDone }) {
         </div>
         <div className="res-editor-body">
           <div className="ed-stage" ref={stageRef} style={{ aspectRatio: String(aspect) }}>
-            <video className="ed-video" ref={videoRef} src={url} controls playsInline preload="metadata" muted
-              onLoadedMetadata={(e) => { const el = e.currentTarget; setMeta({ w: el.videoWidth, h: el.videoHeight, dur: el.duration || 0 }) }}
-              onTimeUpdate={(e) => setSeek(e.currentTarget.currentTime)} />
+            <video className="ed-video" ref={videoRef} src={url + '#t=0.1'} controls playsInline preload="metadata" muted
+              onLoadedMetadata={(e) => { const el = e.currentTarget; const d = el.duration; setMeta((prev) => ({ w: el.videoWidth || prev.w, h: el.videoHeight || prev.h, dur: (isFinite(d) && d > 0) ? d : prev.dur })) }}
+              onTimeUpdate={(e) => { const el = e.currentTarget; setSeek(el.currentTime); const d = el.duration; if (isFinite(d) && d > 0) setMeta((prev) => (prev.dur === d ? prev : { ...prev, dur: d })) }} />
             {cropOn && (
               <Fragment>
                 <div className="ed-mask" style={{ left: 0, top: 0, width: '100%', height: (box.y * 100) + '%' }} />
@@ -1262,6 +1280,163 @@ function VideoReport({ dir, sub, item, onClose, onDone }) {
           {status === 'done' && (
             <p className="gen-hint">完成! {fmtLabel} {out} 已產生，可在「{outDir}」分頁開啟。</p>
           )}
+
+          <div className="res-prompt-actions">
+            <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function VideoAudio({ dir, sub, item, onClose, onDone }) {
+  const [mode, setMode] = useState('replace')
+  const [source, setSource] = useState('upload')
+  const [file, setFile] = useState(null)
+  const [audioList, setAudioList] = useState([])
+  const [audioName, setAudioName] = useState('')
+  const [jobId, setJobId] = useState('')
+  const [out, setOut] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  const busy = !!jobId
+  const isExtract = mode === 'extract'
+  const needAudio = !isExtract
+
+  useEffect(() => {
+    if (needAudio && source === 'server') {
+      fetch('/comfy/resources/list?dir=' + encodeURIComponent('Audio') + '&sub=')
+        .then((r) => r.json())
+        .then((d) => {
+          const list = (d.items || []).filter((f) => f.type === 'file' && f.kind === 'audio')
+          setAudioList(list)
+          if (list.length && !audioName) setAudioName(list[0].name)
+        })
+        .catch(() => setAudioList([]))
+    }
+  }, [source, needAudio])
+
+  async function submit() {
+    setError('')
+    if (needAudio && source === 'upload' && !file) { setStatus('error'); setError('請選擇音訊檔'); return }
+    if (needAudio && source === 'server' && !audioName) { setStatus('error'); setError('請從 Audio 目錄選擇音訊檔'); return }
+    setStatus('running'); setProgress(0); setOut('')
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub || '')
+    fd.append('name', item.name)
+    fd.append('mode', mode)
+    if (needAudio) {
+      fd.append('source', source)
+      if (source === 'server') fd.append('audio_name', audioName)
+      else fd.append('audio', file)
+    }
+    try {
+      const r = await fetch('/comfy/resources/video-audio', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id); setOut(d.name || '')
+    } catch (e) {
+      setStatus('error'); setError('請求失敗')
+    }
+  }
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') {
+          setStatus('done'); setJobId(''); onDone()
+        } else if (d.status === 'error') {
+          setStatus('error'); setError(d.error || '處理失敗'); setJobId('')
+        } else if (d.status === 'cancelled') {
+          setStatus('cancelled'); setJobId('')
+        }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  const doneHint = isExtract
+    ? ('完成! 已擷取聲音到 Audio 目錄: ' + out)
+    : ('完成! 已產生 ' + out)
+
+  return (
+    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
+      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
+        <div className="res-modal-head">
+          <span className="res-modal-title">加入/取代/擷取聲音</span>
+          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '處理中…' : '開始處理'}</button>
+          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
+        </div>
+        <div className="res-editor-body">
+          <p className="gen-hint">{item.name}</p>
+
+          <label className="res-prompt-label">
+            處理方式
+            <select className="res-select" value={mode} disabled={busy} onChange={(e) => setMode(e.target.value)}>
+              <option value="replace">取代（丟棄原聲音, 改用新音訊）</option>
+              <option value="add">加入（原聲音與新音訊混合）</option>
+              <option value="extract">擷取聲音（抽出影片音訊存到 Audio 目錄）</option>
+            </select>
+          </label>
+
+          {needAudio && (
+            <Fragment>
+              <label className="res-prompt-label">
+                音訊來源
+                <select className="res-select" value={source} disabled={busy} onChange={(e) => setSource(e.target.value)}>
+                  <option value="upload">上傳檔案</option>
+                  <option value="server">從伺服器 Audio 目錄選擇</option>
+                </select>
+              </label>
+
+              {source === 'upload' && (
+                <label className="res-prompt-label">
+                  音訊檔
+                  <input type="file" accept="audio/*,.mp3,.m4a,.wav,.aac,.ogg,.flac,.opus" disabled={busy}
+                    style={{ width: '100%' }}
+                    onChange={(e) => setFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)} />
+                </label>
+              )}
+              {source === 'upload' && file && <p className="gen-hint">已選: {file.name}</p>}
+
+              {source === 'server' && (
+                <label className="res-prompt-label">
+                  Audio 目錄音訊
+                  <select className="res-select" value={audioName} disabled={busy} onChange={(e) => setAudioName(e.target.value)}>
+                    {audioList.length === 0 && <option value="">（Audio 目錄目前無音訊檔）</option>}
+                    {audioList.map((a) => (<option key={a.name} value={a.name}>{a.name}</option>))}
+                  </select>
+                </label>
+              )}
+            </Fragment>
+          )}
+
+          <p className="gen-hint">{isExtract
+            ? '擷取聲音: 抽出影片音訊, 以 m4a 存到 Audio 目錄。'
+            : '輸出為新影片檔（保留原檔）, 存於目前目錄。加入模式若影片本無聲音, 會等同取代。'}</p>
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+          {status === 'done' && <p className="gen-hint">{doneHint}</p>}
 
           <div className="res-prompt-actions">
             <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>

@@ -28,6 +28,13 @@ import base64
 import json
 import os
 import shutil
+
+def _rmtree_long(path):
+    r"""遞迴刪除目錄; Windows 下用 \\?\ 延伸路徑前綴繞過 MAX_PATH(260) 限制。"""
+    p = str(Path(path).resolve())
+    if os.name == "nt" and not p.startswith("\\\\?\\"):
+        p = "\\\\?\\" + p
+    shutil.rmtree(p)
 import tempfile
 import threading
 import uuid
@@ -86,6 +93,7 @@ import video_transcribe
 import video_slides
 import video_summary
 import video_report
+import video_audio
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -335,7 +343,7 @@ def resources_delete_dir(dir: str = Form(...), sub: str = Form(""), name: str = 
         raise HTTPException(status_code=400, detail="不可刪除目前目錄本身")
     if not target.is_dir():
         raise HTTPException(status_code=404, detail="目錄不存在")
-    shutil.rmtree(target)
+    _rmtree_long(target)
     return {"ok": True, "name": safe}
 
 @app.get("/resources/video-related")
@@ -396,7 +404,7 @@ def resources_delete_video(
             if f.is_dir() and f.name.startswith(prefix):
                 resolved = f.resolve()
                 if resolved.is_relative_to(base.resolve()) and resolved != base.resolve():
-                    shutil.rmtree(resolved)
+                    _rmtree_long(resolved)
                     deleted.append(f.name)
 
     return {"ok": True, "deleted": deleted}
@@ -616,6 +624,141 @@ def _start_video_edit_job(job_id, src, target, start, end, crop, ffmpeg_location
     threading.Thread(target=worker, daemon=True).start()
 
 
+def _start_video_audio_job(job_id, src, audio_path, target, mode, duration, ffmpeg_location, temp_audio=False):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            if mode == "extract":
+                video_audio.extract_audio(
+                    src, target, duration,
+                    ffmpeg_location=ffmpeg_location,
+                    log=lambda *_: None,
+                    progress_cb=progress_cb,
+                    cancel_event=cancel_event,
+                )
+            else:
+                video_audio.apply_audio(
+                    src, audio_path, target, mode, duration,
+                    ffmpeg_location=ffmpeg_location,
+                    log=lambda *_: None,
+                    progress_cb=progress_cb,
+                    cancel_event=cancel_event,
+                )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+            Path(target).unlink(missing_ok=True)
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+            Path(target).unlink(missing_ok=True)
+        finally:
+            if temp_audio and audio_path:
+                Path(audio_path).unlink(missing_ok=True)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-audio")
+async def resources_video_audio(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    mode: str = Form("replace"),
+    source: str = Form("upload"),
+    audio_name: str = Form(""),
+    audio: Optional[UploadFile] = File(None, description="音訊檔(上傳來源時)"),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可處理影片檔案")
+    if mode not in ("replace", "add", "extract"):
+        raise HTTPException(status_code=400, detail="模式錯誤")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法處理聲音")
+
+    info = video_edit.probe_video(src, ffmpeg_location)
+    duration = info["duration"]
+    stem = src.stem
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    safe_stem = youtube_clip.slug(stem)
+
+    audio_path = None
+    temp_audio = False
+    if mode == "extract":
+        adir = _resources_dir_path("Audio", "")
+        out_name = f"{ts}_{safe_stem}_audio.m4a"
+        target = adir / out_name
+        if target.exists():
+            target = adir / f"{ts}_{safe_stem}_audio_{uuid.uuid4().hex[:4]}.m4a"
+    else:
+        if source == "server":
+            adir = _resources_dir_path("Audio", "")
+            aname = Path(audio_name).name
+            if not aname or aname != audio_name:
+                raise HTTPException(status_code=400, detail="非法音訊檔名")
+            apath = adir / aname
+            if not apath.is_file():
+                raise HTTPException(status_code=404, detail="Audio 目錄找不到該音訊檔")
+            if _KIND_BY_EXT.get(apath.suffix.lower()) != "audio":
+                raise HTTPException(status_code=400, detail="所選檔案不是音訊")
+            audio_path = str(apath)
+        else:
+            if audio is None:
+                raise HTTPException(status_code=400, detail="請上傳音訊檔")
+            data = await audio.read()
+            if not data:
+                raise HTTPException(status_code=400, detail="音訊檔為空")
+            audio_path = _temp_upload(data, audio.filename, ".mp3")
+            temp_audio = True
+        tag = "audio-replace" if mode == "replace" else "audio-add"
+        out_name = f"{ts}_{safe_stem}_{tag}.mp4"
+        target = base / out_name
+        if target.exists():
+            target = base / f"{ts}_{safe_stem}_{tag}_{uuid.uuid4().hex[:4]}.mp4"
+
+    job_id = _new_job()
+    _start_video_audio_job(job_id, str(src), audio_path, str(target), mode, duration, ffmpeg_location, temp_audio)
+    return {"job_id": job_id, "name": target.name}
+
+
 @app.post("/resources/video-edit")
 def resources_video_edit(
     dir: str = Form("Video"),
@@ -680,12 +823,12 @@ def resources_video_edit(
 
     if end_s <= start_s:
         raise HTTPException(status_code=400, detail="結束時間需晚於起始時間")
-    if crop is None and end_s >= int(duration) - 0.5:
+    if crop is None and start_s <= 0 and end_s >= int(duration) - 0.5:
         raise HTTPException(status_code=400, detail="未選裁切且未擷取時間段, 無可執行動作")
 
     stem = src.stem
     tags = []
-    if end_s < int(duration) - 0.5:
+    if start_s > 0 or end_s < int(duration) - 0.5:
         tags.append(f"trim{youtube_clip.fmt(start_s)}-{youtube_clip.fmt(end_s)}")
     if crop:
         tags.append(f"crop{video_edit._even(crop[2])}x{video_edit._even(crop[3])}")

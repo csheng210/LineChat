@@ -11,7 +11,7 @@ from youtube_clip import fmt  # 复用秒->標籤
 
 def probe_video(path, ffmpeg_location):
     """用 ffmpeg -i 解析影片寬高與長度(不需 ffprobe)。回傳 {'width','height','duration'}。"""
-    r = subprocess.run([ffmpeg_location, "-i", str(path)], capture_output=True, text=True)
+    r = subprocess.run([ffmpeg_location, "-i", str(path)], capture_output=True, text=True, encoding="utf-8", errors="replace")
     text = r.stderr
     duration = 0.0
     m = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", text)
@@ -42,8 +42,11 @@ def build_cmd(ffmpeg_location, src, dst, start, dur, crop):
         cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
                 "-c:a", "aac", "-movflags", "+faststart"]
     else:
-        cmd += ["-c", "copy"]
-    cmd += [str(dst)]
+        # trim-only 也重編碼: 來源音訊常非 AAC(如 YouTube 的 opus/m4a),
+        # -c copy 塞進 mp4 容器會 mux 失敗, 重編碼可保證產出可播放的檔。
+        cmd += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+                "-c:a", "aac", "-movflags", "+faststart"]
+    cmd += ["-avoid_negative_ts", "make_zero", str(dst)]
     return cmd
 
 
@@ -68,7 +71,7 @@ def edit_video(src, dst, start, end, crop, ffmpeg_location,
     cmd = build_cmd(ffmpeg_location, src, dst, start, dur, crop)
     _log("執行 ffmpeg: " + " ".join(cmd[-6:]))
 
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
     try:
         for line in proc.stdout:
             if _cancelled():
