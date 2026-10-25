@@ -17,6 +17,14 @@ function fileUrl(dir, sub, name) {
   )
 }
 
+function subVttUrl(dir, sub, name) {
+  return (
+    '/comfy/resources/subtitle?dir=' + encodeURIComponent(dir) +
+    '&sub=' + encodeURIComponent(sub || '') +
+    '&name=' + encodeURIComponent(name)
+  )
+}
+
 function fmtSize(n) {
   if (n < 1024) return n + ' B'
   if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB'
@@ -36,6 +44,13 @@ export default function ResourcesBrowser() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [text, setText] = useState('')
+  const [showSub, setShowSub] = useState(false)
+  const [delOpen, setDelOpen] = useState(false)
+  const [delItem, setDelItem] = useState(null)
+  const [delRelated, setDelRelated] = useState({ subtitles: [], scene_dirs: [] })
+  const [delSub, setDelSub] = useState(true)
+  const [delScenes, setDelScenes] = useState(true)
+  const [delBusy, setDelBusy] = useState(false)
   const [meta, setMeta] = useState({})
   const [nonce, setNonce] = useState(0)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -69,7 +84,7 @@ export default function ResourcesBrowser() {
         setItems(its)
         setPath(d.path || dir)
         setMeta({})
-        its.filter((x) => x.type === 'file' && x.kind === 'prompt').forEach((f) => {
+        its.filter((x) => x.type === 'file' && (x.kind === 'prompt' || x.kind === 'subtitle')).forEach((f) => {
           fetch(fileUrl(dir, sub, f.name))
             .then((r) => r.text())
             .then((t) => { if (!cancelled) setMeta((prev) => ({ ...prev, [f.name]: { preview: t.slice(0, 50) } })) })
@@ -84,7 +99,8 @@ export default function ResourcesBrowser() {
   function open(f) {
     setSel(f)
     setText('')
-    if (f.kind === 'prompt') {
+    setShowSub(false)
+    if (f.kind === 'prompt' || f.kind === 'subtitle') {
       fetch(fileUrl(dir, sub, f.name))
         .then((r) => r.text())
         .then(setText)
@@ -121,6 +137,18 @@ export default function ResourcesBrowser() {
   }
 
   async function delFile(it) {
+    if (it.kind === 'video') {
+      setDelItem(it)
+      setDelRelated({ subtitles: [], scene_dirs: [] })
+      setDelSub(true); setDelScenes(true); setDelBusy(false)
+      setDelOpen(true)
+      try {
+        const rr = await fetch('/comfy/resources/video-related?dir=' + encodeURIComponent(dir) + '&sub=' + encodeURIComponent(sub || '') + '&name=' + encodeURIComponent(it.name))
+        const dd = await rr.json()
+        if (rr.ok) setDelRelated({ subtitles: dd.subtitles || [], scene_dirs: dd.scene_dirs || [] })
+      } catch (e) { /* 忽略, 保持可刪除 */ }
+      return
+    }
     if (!window.confirm('確定刪除「' + it.name + '」?')) return
     const fd = new FormData()
     fd.append('dir', dir)
@@ -134,6 +162,26 @@ export default function ResourcesBrowser() {
     }
     refresh()
   }
+  async function doDeleteVideo() {
+    if (!delItem || delBusy) return
+    setDelBusy(true)
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', delItem.name)
+    fd.append('del_subtitle', delSub ? '1' : '0')
+    fd.append('del_scenes', delScenes ? '1' : '0')
+    const r = await fetch('/comfy/resources/delete-video', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('刪除失敗: ' + (d.detail || r.status))
+      setDelBusy(false)
+      return
+    }
+    setDelOpen(false); setDelItem(null); setDelBusy(false)
+    refresh()
+  }
+
   async function delDir(it) {
     if (!window.confirm('確定要刪除目錄「' + it.name + '」及其內所有檔案？此操作無法復原。')) return
     const fd = new FormData()
@@ -233,6 +281,11 @@ export default function ResourcesBrowser() {
   }, [ytJobId])
 
   // 麵包屑: path 形如 'Video' 或 'Video/output/sub'
+  function subForVideo(name) {
+    const stem = name.replace(/\.[^.]+$/, '')
+    return items.find((x) => x.type === 'file' && x.kind === 'subtitle' && x.name.replace(/\.[^.]+$/, '') === stem) || null
+  }
+
   const dirs = items.filter((it) => it.type === 'dir')
   const files = items.filter((it) => it.type === 'file')
 
@@ -349,7 +402,7 @@ export default function ResourcesBrowser() {
                   <video className="res-thumb" src={fileUrl(dir, sub, it.name) + '#t=0.1'} muted preload="metadata" playsInline
                     onLoadedMetadata={(e) => { const el = e.currentTarget; const w = el.videoWidth, h = el.videoHeight; setMeta((prev) => ({ ...prev, [it.name]: { w, h } })) }} />
                 ) : (
-                  <div className={'res-thumb ' + (m.preview ? 'res-thumb-preview' : 'res-thumb-text')}>{m.preview ? m.preview : '¶'}</div>
+                  <div className={'res-thumb ' + (m.preview ? 'res-thumb-preview' : 'res-thumb-text')}>{m.preview ? m.preview : (it.kind === 'subtitle' ? '💬' : '¶')}</div>
                 )}
                 <span className="res-item-name">{it.name}</span>
                 <span className="res-item-meta">{[dim, fmtSize(it.size), fmtTime(it.mtime)].filter(Boolean).join(' · ')}</span>
@@ -367,18 +420,59 @@ export default function ResourcesBrowser() {
               <button className="res-modal-close" onClick={() => setSel(null)} aria-label="關閉">✕</button>
             </div>
             <div className="res-modal-body">
-              {sel.kind === 'video' && (
-                <video className="res-modal-video" src={fileUrl(dir, sub, sel.name)} controls playsInline preload="metadata" />
-              )}
+              {sel.kind === 'video' && (() => {
+                const subFile = subForVideo(sel.name)
+                return (
+                  <div className="res-modal-video-wrap">
+                    {subFile && (
+                      <label className="res-sub-toggle">
+                        <input type="checkbox" checked={showSub} onChange={(e) => setShowSub(e.target.checked)} />
+                        顯示字幕
+                      </label>
+                    )}
+                    <video className="res-modal-video" src={fileUrl(dir, sub, sel.name)} controls playsInline preload="metadata" crossOrigin="anonymous">
+                      {subFile && showSub && (
+                        <track kind="subtitles" src={subVttUrl(dir, sub, sel.name)} srcLang="zh" label="字幕" default />
+                      )}
+                    </video>
+                  </div>
+                )
+              })()}
               {sel.kind === 'image' && (
                 <img className="res-modal-img" src={fileUrl(dir, sub, sel.name)} alt={sel.name} />
               )}
-              {sel.kind === 'prompt' && (
+              {(sel.kind === 'prompt' || sel.kind === 'subtitle') && (
                 <pre className="res-modal-text">{text}</pre>
               )}
               {sel.kind === 'other' && (
                 <p className="gen-hint">此檔案類型無法預覽：{sel.name}</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {delOpen && delItem && (
+        <div className="res-modal" onClick={() => { if (!delBusy) setDelOpen(false) }} role="dialog" aria-modal="true">
+          <div className="res-modal-box res-prompt-box" onClick={(e) => e.stopPropagation()}>
+            <div className="res-modal-head">
+              <span className="res-modal-title">刪除影片</span>
+              <button className="res-modal-close" onClick={() => { if (!delBusy) setDelOpen(false) }} aria-label="關閉">✕</button>
+            </div>
+            <div className="res-prompt-form">
+              <p className="gen-hint">確定刪除「{delItem.name}」?</p>
+              <label className="res-del-opt">
+                <input type="checkbox" checked={delSub} disabled={delRelated.subtitles.length === 0} onChange={(e) => setDelSub(e.target.checked)} />
+                同時刪除字幕檔{delRelated.subtitles.length > 0 ? '（' + delRelated.subtitles.join(', ') + '）' : '（無）'}
+              </label>
+              <label className="res-del-opt">
+                <input type="checkbox" checked={delScenes} disabled={delRelated.scene_dirs.length === 0} onChange={(e) => setDelScenes(e.target.checked)} />
+                同時刪除擷取圖目錄{delRelated.scene_dirs.length > 0 ? '（' + delRelated.scene_dirs.length + ' 個）' : '（無）'}
+              </label>
+              <div className="res-prompt-actions">
+                <button className="res-tool-btn" onClick={() => { if (!delBusy) setDelOpen(false) }} disabled={delBusy}>取消</button>
+                <button className="res-tool-btn primary" onClick={doDeleteVideo} disabled={delBusy}>{delBusy ? '刪除中…' : '確定刪除'}</button>
+              </div>
             </div>
           </div>
         </div>

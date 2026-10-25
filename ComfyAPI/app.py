@@ -38,7 +38,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, File, Form, UploadFile, HTTPException, Query
-from fastapi.responses import JSONResponse, Response, FileResponse
+from fastapi.responses import JSONResponse, Response, FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 import cv2
@@ -193,6 +193,7 @@ _MEDIA_TYPES = {
     ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp",
     ".gif": "image/gif", ".bmp": "image/bmp",
     ".txt": "text/plain; charset=utf-8", ".md": "text/plain; charset=utf-8", ".json": "application/json",
+    ".srt": "text/plain; charset=utf-8", ".vtt": "text/plain; charset=utf-8",
 }
 _KIND_BY_EXT = {}
 for _e in (".mp4", ".webm", ".mov", ".mkv"):
@@ -201,6 +202,8 @@ for _e in (".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"):
     _KIND_BY_EXT[_e] = "image"
 for _e in (".txt", ".md", ".json"):
     _KIND_BY_EXT[_e] = "prompt"
+for _e in (".srt", ".vtt"):
+    _KIND_BY_EXT[_e] = "subtitle"
 
 
 def _resources_dir_path(dir_name: str, sub: str = "") -> Path:
@@ -252,6 +255,28 @@ def resources_file(dir: str = Query(...), name: str = Query(...), sub: str = Que
     return FileResponse(str(target), media_type=media, filename=safe)
 
 
+@app.get("/resources/subtitle")
+def resources_subtitle(dir: str = Query(...), name: str = Query(...), sub: str = Query("")):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    stem = Path(safe).stem
+    sub_file = None
+    for ext in (".srt", ".vtt"):
+        cand = base / (stem + ext)
+        if cand.is_file():
+            sub_file = cand
+            break
+    if sub_file is None:
+        raise HTTPException(status_code=404, detail="此影片沒有字幕檔")
+    try:
+        vtt = youtube_clip.srt_to_vtt(str(sub_file))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"字幕轉換失敗: {e}")
+    return PlainTextResponse(vtt, media_type="text/vtt; charset=utf-8")
+
+
 _KIND_DIR = {"Video": "video", "Image": "image", "Prompt": "prompt"}
 
 @app.post("/resources/upload")
@@ -299,6 +324,69 @@ def resources_delete_dir(dir: str = Form(...), sub: str = Form(""), name: str = 
         raise HTTPException(status_code=404, detail="目錄不存在")
     shutil.rmtree(target)
     return {"ok": True, "name": safe}
+
+@app.get("/resources/video-related")
+def resources_video_related(dir: str = Query(...), name: str = Query(...), sub: str = Query("")):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    stem = Path(safe).stem
+    slug = youtube_clip.slug(stem, 24)
+    subtitles = []
+    for ext in (".srt", ".vtt"):
+        if (base / (stem + ext)).is_file():
+            subtitles.append(stem + ext)
+    scene_dirs = []
+    prefix = f"scenes_{slug}_"
+    for f in base.iterdir():
+        if f.is_dir() and f.name.startswith(prefix):
+            scene_dirs.append(f.name)
+    scene_dirs.sort()
+    return {"subtitles": subtitles, "scene_dirs": scene_dirs}
+
+@app.post("/resources/delete-video")
+def resources_delete_video(
+    dir: str = Form(...),
+    sub: str = Form(""),
+    name: str = Form(...),
+    del_subtitle: str = Form("1"),
+    del_scenes: str = Form("1"),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    target = base / safe
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    if _KIND_BY_EXT.get(target.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可刪除影片檔案")
+
+    deleted = []
+    target.unlink()
+    deleted.append(safe)
+
+    stem = Path(safe).stem
+    slug = youtube_clip.slug(stem, 24)
+
+    if del_subtitle in ("1", "true", "yes", "on"):
+        for ext in (".srt", ".vtt"):
+            cand = base / (stem + ext)
+            if cand.is_file():
+                cand.unlink()
+                deleted.append(cand.name)
+
+    if del_scenes in ("1", "true", "yes", "on"):
+        prefix = f"scenes_{slug}_"
+        for f in base.iterdir():
+            if f.is_dir() and f.name.startswith(prefix):
+                resolved = f.resolve()
+                if resolved.is_relative_to(base.resolve()) and resolved != base.resolve():
+                    shutil.rmtree(resolved)
+                    deleted.append(f.name)
+
+    return {"ok": True, "deleted": deleted}
 
 @app.post("/resources/move-up")
 def resources_move_up(dir: str = Form(...), sub: str = Form(""), name: str = Form(...)):
@@ -369,7 +457,7 @@ def _start_youtube_job(job_id, url, start, end, target_path, ffmpeg_location, ti
             if j:
                 j["status"] = "running"
         try:
-            youtube_clip.download_clip(
+            result = youtube_clip.download_clip(
                 url, start, end, target_path,
                 ffmpeg_location=ffmpeg_location,
                 title_hint=title, duration_hint=duration,
@@ -377,11 +465,19 @@ def _start_youtube_job(job_id, url, start, end, target_path, ffmpeg_location, ti
                 progress_cb=progress_cb,
                 cancel_event=cancel_event,
             )
+            sub_name = None
+            try:
+                sp = (result or {}).get("subtitle")
+                if sp:
+                    sub_name = Path(sp).name
+            except Exception:
+                sub_name = None
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
                 if j:
                     j["status"] = "done"
                     j["progress"] = 1.0
+                    j["subtitle"] = sub_name
         except (core.CancelledError, KeyboardInterrupt):
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
@@ -661,7 +757,8 @@ def resources_video_scenes(
     thr = max(5.0, min(60.0, thr))
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_dir = base / f"scenes_{ts}_{uuid.uuid4().hex[:4]}"
+    slug = youtube_clip.slug(Path(safe).stem, 24)
+    out_dir = base / f"scenes_{slug}_{ts}_{uuid.uuid4().hex[:4]}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     job_id = _new_job()
@@ -705,7 +802,8 @@ def resources_video_scenes_add(
         od = base / out_dir
     else:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        od = base / f"scenes_{ts}_{uuid.uuid4().hex[:4]}"
+        slug = youtube_clip.slug(Path(safe).stem, 24)
+        od = base / f"scenes_{slug}_{ts}_{uuid.uuid4().hex[:4]}"
     od.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -1321,7 +1419,7 @@ def job_status(id: str):
             raise HTTPException(status_code=404, detail="job not found")
         return {
             "status": j["status"], "progress": j["progress"],
-            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"], "scenes": j.get("scenes"),
+            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"], "scenes": j.get("scenes"), "subtitle": j.get("subtitle"),
         }
 
 

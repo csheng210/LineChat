@@ -1663,6 +1663,14 @@
 .res-modal-close:hover { background: #e6e6e6; }
 .res-modal-body { padding: 16px; overflow: auto; background: #000; }
 .res-modal-video, .res-modal-img { display: block; width: 100%; max-height: 74vh; border-radius: 8px; object-fit: contain; }
+
+.res-modal-video-wrap { display: flex; flex-direction: column; gap: 8px; }
+.res-sub-toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: #444; align-self: flex-start; cursor: pointer; user-select: none; }
+.res-sub-toggle input { cursor: pointer; }
+
+.res-del-opt { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #333; padding: 6px 0; cursor: pointer; user-select: none; }
+.res-del-opt input { cursor: pointer; }
+.res-del-opt input:disabled { cursor: default; }
 .res-modal-img { background: #f2f2f2; }
 .res-modal-text { white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.6; color: #222; background: #fff; padding: 12px; border-radius: 8px; font-family: inherit; }
 

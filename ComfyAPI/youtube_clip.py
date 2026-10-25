@@ -87,6 +87,126 @@ def _cut(ffmpeg_location, src, dst, start, dur, log):
         raise RuntimeError("ffmpeg 剪輯失敗")
 
 
+SUB_LANG_PREF = ["zh-TW", "zh-tw", "zh-Hant", "zh-hant", "zh", "en"]
+
+
+def _parse_ts(s):
+    """解析 'HH:MM:SS,mmm' / 'HH:MM:SS.mmm' / 'MM:SS.mmm' 為秒。"""
+    s = s.strip().replace(",", ".")
+    parts = [float(x) for x in s.split(":")]
+    if len(parts) == 3:
+        h, m, sec = parts
+    elif len(parts) == 2:
+        h, (m, sec) = 0, parts
+    else:
+        h, m, sec = 0, 0, parts[0]
+    return h * 3600 + m * 60 + sec
+
+
+def _fmt_ts(t):
+    """秒 -> 'HH:MM:SS,mmm'。"""
+    if t < 0:
+        t = 0.0
+    total_ms = int(round(t * 1000))
+    ms = total_ms % 1000
+    total_s = total_ms // 1000
+    sec = total_s % 60
+    m = (total_s // 60) % 60
+    h = total_s // 3600
+    return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
+
+
+def _parse_cues(path):
+    """解析 .srt/.vtt 為 [(start_sec, end_sec, [text lines]), ...]。"""
+    text = Path(path).read_text(encoding="utf-8", errors="replace")
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    blocks = re.split(r"\n\s*\n", text)
+    cues = []
+    for b in blocks:
+        lines = [l for l in b.split("\n") if l.strip()]
+        ts_idx = -1
+        for i, l in enumerate(lines):
+            if "-->" in l:
+                ts_idx = i
+                break
+        if ts_idx < 0:
+            continue
+        m = re.search(r"([0-9.,:]+)\s*-->\s*([0-9.,:]+)", lines[ts_idx])
+        if not m:
+            continue
+        start = _parse_ts(m.group(1))
+        end = _parse_ts(m.group(2))
+        txt = [l.strip() for l in lines[ts_idx + 1:]]
+        if txt:
+            cues.append((start, end, txt))
+    return cues
+
+
+def _trim_subtitle(src_path, seg_start, seg_end, dst_path):
+    """把整份字幕依 [seg_start, seg_end] 裁出對應時段, 時間軸對齊片段起點, 寫成 .srt。"""
+    cues = _parse_cues(src_path)
+    seg_dur = seg_end - seg_start
+    kept = []
+    for (s, e, txt) in cues:
+        if e <= seg_start or s >= seg_end:
+            continue
+        ns = max(0.0, s - seg_start)
+        ne = min(seg_dur, e - seg_start)
+        if ne < ns:
+            ne = ns
+        kept.append((ns, ne, txt))
+    if not kept:
+        return False
+    out = []
+    for i, (s, e, txt) in enumerate(kept, 1):
+        out.append(str(i))
+        out.append(f"{_fmt_ts(s)} --> {_fmt_ts(e)}")
+        out.extend(txt)
+        out.append("")
+    Path(dst_path).write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+    return True
+
+
+def _fmt_vtt_ts(t):
+    """秒 -> WebVTT 時間 'HH:MM:SS.mmm'(點分隔)。"""
+    if t < 0:
+        t = 0.0
+    total_ms = int(round(t * 1000))
+    ms = total_ms % 1000
+    total_s = total_ms // 1000
+    sec = total_s % 60
+    m = (total_s // 60) % 60
+    h = total_s // 3600
+    return f"{h:02d}:{m:02d}:{sec:02d}.{ms:03d}"
+
+
+def srt_to_vtt(src_path):
+    """讀取 .srt/.vtt 字幕, 輸出 WebVTT 字串(供瀏覽器 <track> 使用)。"""
+    cues = _parse_cues(src_path)
+    out = ["WEBVTT", ""]
+    for (s, e, txt) in cues:
+        out.append(f"{_fmt_vtt_ts(s)} --> {_fmt_vtt_ts(e)}")
+        out.extend(txt)
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"
+
+
+def _pick_subtitle_file(tmp_dir, lang_pref=None):
+    """從下載暫存目錄挑一份字幕檔, 依語言偏好排序。"""
+    lang_pref = lang_pref or SUB_LANG_PREF
+    subs = [p for p in tmp_dir.iterdir() if p.is_file() and p.suffix.lower() in (".srt", ".vtt")]
+    if not subs:
+        return None
+    def rank(p):
+        name = p.name.lower()
+        for i, lang in enumerate(lang_pref):
+            if ("." + lang.lower() + ".") in name:
+                return i
+        return len(lang_pref)
+    subs.sort(key=rank)
+    return subs[0]
+
+
 def download_clip(url, start, end, out_path, ffmpeg_location=None,
                   title_hint=None, duration_hint=0, log=None,
                   progress_cb=None, cancel_event=None):
@@ -170,9 +290,40 @@ def download_clip(url, start, end, out_path, ffmpeg_location=None,
         _check_cancel()
 
         out_path.write_bytes(cut_path.read_bytes())
+
+        sub_path = None
+        try:
+            sub_tmp = out_dir / f"_sub_{uuid.uuid4().hex[:8]}"
+            sub_tmp.mkdir(parents=True, exist_ok=True)
+            sub_opts = _base_opts(ffmpeg_location)
+            sub_opts.update({
+                "skip_download": True,
+                "writesubtitles": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": SUB_LANG_PREF,
+                "subtitlesformat": "srt/best",
+                "outtmpl": str(sub_tmp / "%(title)s.%(ext)s"),
+                "restrictfilenames": True,
+                "ignoreerrors": True,
+                "quiet": True,
+                "no_warnings": True,
+            })
+            with yt_dlp.YoutubeDL(sub_opts) as ydl2:
+                ydl2.download([url])
+            sub_src = _pick_subtitle_file(sub_tmp)
+            if sub_src is not None:
+                dst_srt = out_path.with_suffix(".srt")
+                if _trim_subtitle(str(sub_src), start, end, str(dst_srt)):
+                    sub_path = str(dst_srt)
+                    _log(f"字幕: {dst_srt.name}")
+            import shutil as _sh
+            _sh.rmtree(sub_tmp, ignore_errors=True)
+        except Exception as e:
+            _log(f"字幕處理失敗(忽略): {e}")
+
         if progress_cb:
             progress_cb(100, 100)
-        return {"title": title, "start": start, "end": end, "path": str(out_path)}
+        return {"title": title, "start": start, "end": end, "path": str(out_path), "subtitle": sub_path}
     finally:
         import shutil
         shutil.rmtree(tmp_dir, ignore_errors=True)
