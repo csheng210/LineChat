@@ -51,6 +51,8 @@ export default function ResourcesBrowser() {
   const [ytError, setYtError] = useState('')
   const [edOpen, setEdOpen] = useState(false)
   const [edItem, setEdItem] = useState(null)
+  const [scOpen, setScOpen] = useState(false)
+  const [scItem, setScItem] = useState(null)
   const fileRef = useRef(null)
 
   useEffect(() => {
@@ -132,6 +134,21 @@ export default function ResourcesBrowser() {
     }
     refresh()
   }
+  async function delDir(it) {
+    if (!window.confirm('確定要刪除目錄「' + it.name + '」及其內所有檔案？此操作無法復原。')) return
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', it.name)
+    const r = await fetch('/comfy/resources/delete-dir', { method: 'POST', body: fd })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      setError('刪除目錄失敗: ' + (d.detail || r.status))
+      return
+    }
+    refresh()
+  }
+
   async function moveUp(it) {
     if (!sub) { setError('已在頂層目錄，無法再往上層移動'); return }
     if (!window.confirm('把「' + it.name + '」移到上層目錄?')) return
@@ -293,12 +310,15 @@ export default function ResourcesBrowser() {
         {dirs.length > 0 && (
           <div className="res-dirs">
             {dirs.map((it) => (
-              <button key={'d:' + it.name} className="res-dir-btn" onClick={() => enterDir(it.name)}>
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                </svg>
-                <span>{it.name}</span>
-              </button>
+              <div key={'d:' + it.name} className="res-dir-item">
+                <button className="res-dir-btn" onClick={() => enterDir(it.name)}>
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  </svg>
+                  <span>{it.name}</span>
+                </button>
+                <button className="res-dir-del" title="刪除目錄" aria-label="刪除目錄" onClick={(e) => { e.stopPropagation(); delDir(it) }}>✕</button>
+              </div>
             ))}
           </div>
         )}
@@ -317,7 +337,10 @@ export default function ResourcesBrowser() {
                 )}
                 <button className="res-card-del" title="刪除" aria-label="刪除" onClick={(e) => { e.stopPropagation(); delFile(it) }}>✕</button>
                 {it.kind === 'video' && (
-                  <button className="res-card-edit" title="編輯影片" aria-label="編輯影片" onClick={(e) => { e.stopPropagation(); setEdItem(it); setEdOpen(true) }}>✎</button>
+                  <Fragment>
+                    <button className="res-card-edit" title="編輯影片" aria-label="編輯影片" onClick={(e) => { e.stopPropagation(); setEdItem(it); setEdOpen(true) }}>📝</button>
+                    <button className="res-card-edit res-card-scene" title="場景關鍵畫面" aria-label="場景關鍵畫面" onClick={(e) => { e.stopPropagation(); setScItem(it); setScOpen(true) }}>🎬</button>
+                  </Fragment>
                 )}
                 {it.kind === 'image' ? (
                   <img className="res-thumb" src={fileUrl(dir, sub, it.name)} alt={it.name} loading="lazy"
@@ -444,6 +467,16 @@ export default function ResourcesBrowser() {
           item={edItem}
           onClose={() => { setEdOpen(false); setEdItem(null) }}
           onDone={() => { setEdOpen(false); setEdItem(null); refresh() }}
+        />
+      )}
+
+      {scOpen && scItem && (
+        <SceneAnalyzer
+          dir={dir}
+          sub={sub}
+          item={scItem}
+          onClose={() => { setScOpen(false); setScItem(null) }}
+          onDone={() => refresh()}
         />
       )}
     </div>
@@ -654,3 +687,169 @@ function VideoEditor({ dir, sub, item, onClose, onDone }) {
     </div>
   )
 }
+
+// 場景關鍵畫面: 用後端 PySceneDetect 偵測轉場, 每段取頭尾兩張, 顯示縮圖牆。走 /resources/video-scenes 背景任務。
+function SceneAnalyzer({ dir, sub, item, onClose, onDone }) {
+  const [threshold, setThreshold] = useState(27)
+  const [jobId, setJobId] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+  const [scenes, setScenes] = useState(null)
+  const [outDir, setOutDir] = useState('')
+  const [seek, setSeek] = useState(0)
+  const [dur, setDur] = useState(0)
+  const [manual, setManual] = useState([])
+  const [adding, setAdding] = useState(false)
+  const videoRef = useRef(null)
+
+  const busy = !!jobId
+
+  async function submit() {
+    setError(''); setStatus('running'); setProgress(0); setScenes(null); setManual([])
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub || '')
+    fd.append('name', item.name)
+    fd.append('threshold', String(threshold))
+    try {
+      const r = await fetch('/comfy/resources/video-scenes', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id); setOutDir(d.out_dir || '')
+    } catch (e) {
+      setStatus('error'); setError('請求失敗')
+    }
+  }
+
+  async function addManual() {
+    if (adding) return
+    setAdding(true); setError('')
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub || '')
+    fd.append('name', item.name)
+    fd.append('time', String(seek))
+    fd.append('out_dir', outDir || '')
+    try {
+      const r = await fetch('/comfy/resources/video-scenes/add', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setError('新增失敗: ' + (d.detail || r.status)); setAdding(false); return }
+      setOutDir(d.out_dir)
+      setManual((prev) => [...prev, { file: d.file, time: d.time }])
+      onDone()
+    } catch (e) {
+      setError('新增請求失敗')
+    }
+    setAdding(false)
+  }
+
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') {
+          setScenes(d.scenes || []); setStatus('done'); setJobId(''); onDone()
+        } else if (d.status === 'error') {
+          setStatus('error'); setError(d.error || '處理失敗'); setJobId('')
+        } else if (d.status === 'cancelled') {
+          setStatus('cancelled'); setJobId('')
+        }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  const subPath = sub ? sub + '/' + outDir : outDir
+
+  return (
+    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
+      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
+        <div className="res-modal-head">
+          <span className="res-modal-title">場景關鍵畫面</span>
+          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '分析中…' : '擷取'}</button>
+          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
+        </div>
+        <div className="res-editor-body">
+          <label className="res-prompt-label">
+            轉場敏感度 (threshold): {threshold}
+            <input className="ed-slider" type="range" min="10" max="50" step="1" value={threshold}
+              disabled={busy} onChange={(e) => setThreshold(parseInt(e.target.value, 10))} />
+          </label>
+          <p className="gen-hint">數值越低越敏感(切越多段), 越高越寬鬆。預設 27。每段取頭張與轉場前尾張。</p>
+
+          <div className="sc-manual">
+            <div className="sc-manual-head">手動擷取關鍵畫面</div>
+            <video className="ed-video sc-video" ref={videoRef} src={fileUrl(dir, sub, item.name)} controls playsInline preload="metadata" muted
+              onLoadedMetadata={(e) => setDur(e.currentTarget.duration || 0)}
+              onTimeUpdate={(e) => setSeek(e.currentTarget.currentTime)} />
+            <div className="ed-scrub">
+              <span className="ed-scrub-time">{seek.toFixed(1)}s</span>
+              <input className="ed-slider" type="range" min="0" max={dur || 0} step="0.1" value={seek}
+                onChange={(e) => { const v = parseFloat(e.target.value); setSeek(v); if (videoRef.current) videoRef.current.currentTime = v }} />
+              <span className="ed-scrub-time">{(dur || 0).toFixed(1)}s</span>
+            </div>
+            <div className="res-prompt-actions">
+              <button className="res-tool-btn primary" onClick={addManual} disabled={adding || !dur}>
+                {adding ? '擷取中…' : '＋ 新增關鍵畫面'}
+              </button>
+            </div>
+            {manual.length > 0 && (
+              <div className="sc-manual-grid">
+                {manual.map((m, i) => (
+                  <figure className="sc-fig" key={m.file}>
+                    <img src={fileUrl(dir, subPath, m.file)} alt={m.file} loading="lazy" />
+                    <figcaption>{m.time}s</figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+
+          {scenes && (
+            <div className="sc-grid">
+              {scenes.length === 0 && <p className="gen-hint">未偵測到場景, 請調低 threshold 再試。</p>}
+              {scenes.map((sc) => (
+                <div className="sc-seg" key={sc.index}>
+                  <div className="sc-seg-head">第 {sc.index} 段 · {sc.start}s → {sc.end}s</div>
+                  <div className="sc-seg-imgs">
+                    <figure className="sc-fig">
+                      <img src={fileUrl(dir, subPath, sc.start_file)} alt={sc.start_file} loading="lazy" />
+                      <figcaption>頭</figcaption>
+                    </figure>
+                    <figure className="sc-fig">
+                      <img src={fileUrl(dir, subPath, sc.end_file)} alt={sc.end_file} loading="lazy" />
+                      <figcaption>尾</figcaption>
+                    </figure>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="res-prompt-actions">
+            <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+

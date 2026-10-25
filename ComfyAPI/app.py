@@ -27,6 +27,7 @@ ComfyUI 生圖服務（FastAPI）
 import base64
 import json
 import os
+import shutil
 import tempfile
 import threading
 import uuid
@@ -80,6 +81,7 @@ import run_video2prompt as rvp
 import run_image2prompt as rip
 import youtube_clip
 import video_edit
+import video_scene
 
 app = FastAPI(title="ComfyUI 生圖服務", version="1.0")
 
@@ -279,6 +281,23 @@ def resources_delete(dir: str = Form(...), sub: str = Form(""), name: str = Form
     if not target.is_file():
         raise HTTPException(status_code=404, detail="檔案不存在")
     target.unlink()
+    return {"ok": True, "name": safe}
+
+@app.post("/resources/delete-dir")
+def resources_delete_dir(dir: str = Form(...), sub: str = Form(""), name: str = Form(...)):
+    # 遞迴刪除目前目錄下的一個子目錄(含其內所有檔案與次目錄)。不可刪根目錄。
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法目錄名")
+    target = (base / safe).resolve()
+    if not target.is_relative_to(base.resolve()):
+        raise HTTPException(status_code=400, detail="非法路徑")
+    if target == base.resolve():
+        raise HTTPException(status_code=400, detail="不可刪除目前目錄本身")
+    if not target.is_dir():
+        raise HTTPException(status_code=404, detail="目錄不存在")
+    shutil.rmtree(target)
     return {"ok": True, "name": safe}
 
 @app.post("/resources/move-up")
@@ -560,6 +579,142 @@ def resources_video_edit(
     job_id = _new_job()
     _start_video_edit_job(job_id, str(src), str(target), start_s, end_s, crop, ffmpeg_location)
     return {"job_id": job_id, "name": target.name}
+
+
+
+def _start_video_scene_job(job_id, src, out_dir, threshold, ffmpeg_location):
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            scenes = video_scene.detect_scenes(src, threshold=threshold)
+            if not scenes:
+                raise RuntimeError("未偵測到任何場景(可調低 threshold 再試)")
+            results = video_scene.extract_scene_frames(
+                src, scenes, out_dir, ffmpeg_location=ffmpeg_location,
+                log=lambda *_: None, progress_cb=progress_cb, cancel_event=cancel_event,
+            )
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["scenes"] = results
+        except (core.CancelledError, KeyboardInterrupt):
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+@app.post("/resources/video-scenes")
+def resources_video_scenes(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    threshold: str = Form("27"),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可分析影片檔案")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法擷取影格")
+
+    try:
+        thr = float(threshold)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="threshold 格式錯誤")
+    thr = max(5.0, min(60.0, thr))
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = base / f"scenes_{ts}_{uuid.uuid4().hex[:4]}"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    job_id = _new_job()
+    _start_video_scene_job(job_id, str(src), str(out_dir), thr, ffmpeg_location)
+    return {"job_id": job_id, "out_dir": out_dir.name}
+
+
+@app.post("/resources/video-scenes/add")
+def resources_video_scenes_add(
+    dir: str = Form("Video"),
+    sub: str = Form(""),
+    name: str = Form(...),
+    time: str = Form("0"),
+    out_dir: str = Form(""),
+):
+    base = _resources_dir_path(dir, sub)
+    safe = Path(name).name
+    if not safe or safe != name:
+        raise HTTPException(status_code=400, detail="非法檔名")
+    src = base / safe
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="來源檔案不存在")
+    if _KIND_BY_EXT.get(src.suffix.lower()) != "video":
+        raise HTTPException(status_code=400, detail="僅可擷取影片檔案")
+
+    ffmpeg_location = None
+    try:
+        import imageio_ffmpeg
+        ffmpeg_location = imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        pass
+    if not ffmpeg_location:
+        raise HTTPException(status_code=500, detail="找不到 ffmpeg, 無法擷取影格")
+
+    try:
+        t = max(0.0, float(time))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="time 格式錯誤")
+
+    if out_dir and Path(out_dir).name == out_dir:
+        od = base / out_dir
+    else:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        od = base / f"scenes_{ts}_{uuid.uuid4().hex[:4]}"
+    od.mkdir(parents=True, exist_ok=True)
+
+    try:
+        fname = video_scene.add_manual_frame(str(src), t, str(od), ffmpeg_location)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"擷取影格失敗: {e}")
+    if not (od / fname).is_file():
+        raise HTTPException(status_code=500, detail="擷取影格失敗")
+    return {"ok": True, "out_dir": od.name, "file": fname, "time": round(t, 2)}
 
 
 # ---- 模型聊天(OpenAI 相容 /chat/completions): 模型資訊由前端選單帶入, 後端不寫死 ----
@@ -1166,7 +1321,7 @@ def job_status(id: str):
             raise HTTPException(status_code=404, detail="job not found")
         return {
             "status": j["status"], "progress": j["progress"],
-            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"],
+            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"], "scenes": j.get("scenes"),
         }
 
 
