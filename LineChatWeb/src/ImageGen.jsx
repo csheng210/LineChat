@@ -271,6 +271,7 @@ export default function ImageGen({ active }) {
   if (active === 'queue') return <QueueManager />
   if (active === 'outputs') return <OutputsBrowser />
   if (active === 'chat') return <ChatPanel />
+  if (active === 'videoReport') return <VideoReportPage />
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo || isFl2v // 圖生影片/首尾圖生影片才顯示秒數
@@ -928,5 +929,251 @@ function ChatPanel() {
         <button type="button" className="gen-chat-send" onClick={send} disabled={sending || !input.trim()}>{sending ? '傳送中…' : '傳送'}</button>
       </div>
     </section>
+  )
+}
+
+
+// 影片產出摘要頁面: 選影片比照反推提示詞(從伺服器選影片彈窗), 也可從本機上傳(上傳到 Video 目錄後再產生)。
+//   依字幕產生摘要/分段摘要/簡報: 摘要與分段摘要存到「提示詞」目錄, 簡報類存到影片目錄。
+function VideoReportPage() {
+  const [video, setVideo] = useState(null) // { kind:'server'|'local', file, dir, sub, name }
+  const [videoUrl, setVideoUrl] = useState('')
+  const [picker, setPicker] = useState(null)
+  const [fmt, setFmt] = useState('summary')
+  const [model, setModel] = useState(VTP_MODELS[0]?.id || '')
+  const [think, setThink] = useState(true)
+  const [target, setTarget] = useState('')
+  const [maxSlides, setMaxSlides] = useState(10)
+  const [vision, setVision] = useState(false)
+  const [jobId, setJobId] = useState('')
+  const [out, setOut] = useState('')
+  const [progress, setProgress] = useState(0)
+  const [status, setStatus] = useState('')
+  const [error, setError] = useState('')
+
+  const busy = !!jobId
+  const isSlide = fmt === 'pptx' || fmt === 'pdf' || fmt === 'html'
+
+  // 選到影片時產生可播放來源(object URL), 換檔/卸載時釋放。
+  useEffect(() => {
+    if (!video?.file) { setVideoUrl(''); return }
+    const url = URL.createObjectURL(video.file)
+    setVideoUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [video])
+
+  async function submit() {
+    if (!video?.file) { setError('請先選擇影片'); return }
+    const vtp = VTP_MODELS.find((m) => m.id === model) || VTP_MODELS[0]
+    if (!vtp) { setError('請先選擇模型'); return }
+    setError(''); setStatus('running'); setProgress(0); setOut('')
+
+    let dir = 'Video', sub = '', name = ''
+    try {
+      if (video.kind === 'local') {
+        // 本機影片: 先上傳到 Video 目錄, 取得伺服器檔名後再產生
+        const uf = new FormData()
+        uf.append('dir', 'Video')
+        uf.append('sub', '')
+        uf.append('files', video.file)
+        const ur = await fetch('/comfy/resources/upload', { method: 'POST', body: uf })
+        const ud = await ur.json().catch(() => ({}))
+        if (!ur.ok) { setStatus('error'); setError('上傳失敗: ' + (ud.detail || ur.status)); return }
+        name = (ud.saved && ud.saved[0]) || video.file.name
+      } else {
+        dir = video.dir; sub = video.sub || ''; name = video.name
+      }
+    } catch (e) {
+      setStatus('error'); setError('上傳失敗'); return
+    }
+
+    const fd = new FormData()
+    fd.append('dir', dir)
+    fd.append('sub', sub)
+    fd.append('name', name)
+    fd.append('fmt', fmt)
+    fd.append('base_url', vtp.base_url)
+    fd.append('model', vtp.id)
+    fd.append('api_key', vtp.api_key)
+    fd.append('target', target)
+    fd.append('enable_thinking', think ? 'true' : 'false')
+    if (isSlide) {
+      fd.append('max_slides', String(maxSlides))
+      fd.append('vision', vision ? '1' : '0')
+    }
+    try {
+      const r = await fetch('/comfy/resources/video-report', { method: 'POST', body: fd })
+      const d = await r.json().catch(() => ({}))
+      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
+      setJobId(d.job_id); setOut(d.out || '')
+    } catch (e) {
+      setStatus('error'); setError('請求失敗')
+    }
+  }
+
+  useEffect(() => {
+    if (!jobId) return
+    let stopped = false
+    const tick = async () => {
+      try {
+        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
+        const d = await r.json()
+        if (stopped) return
+        setProgress(d.progress || 0)
+        if (d.status === 'done') { setStatus('done'); setJobId('') }
+        else if (d.status === 'error') { setStatus('error'); setError(d.error || '發生失敗'); setJobId('') }
+        else if (d.status === 'cancelled') { setStatus('cancelled'); setJobId('') }
+      } catch (e) { if (!stopped) { setStatus('error'); setError('查詢失敗'); setJobId('') } }
+    }
+    const t = setInterval(tick, 1500)
+    tick()
+    return () => { stopped = true; clearInterval(t) }
+  }, [jobId])
+
+  const fmtLabel = { summary: '摘要', segments: '分段摘要', pptx: '投影片 PPTX', pdf: 'PDF', html: 'HTML 簡報' }[fmt]
+  const outDir = (fmt === 'summary' || fmt === 'segments') ? '提示詞' : '影片'
+
+  return (
+    <div className="gen-page">
+      <section className="gen-main">
+        <header className="gen-main-header">
+          <strong>影片產出摘要</strong>
+          <span className="gen-main-desc">挑選影片（伺服器或本機）→ 依字幕產生摘要，結果存到「提示詞」目錄</span>
+        </header>
+        <div className="gen-form">
+          <div className="gen-images">
+            <label className="gen-upload">
+              <span className="gen-upload-label">輸入影片</span>
+              <input
+                type="file"
+                accept="video/*"
+                onChange={(e) => {
+                  const f = e.target.files && e.target.files[0]
+                  if (f) setVideo({ kind: 'local', file: f, name: f.name })
+                }}
+              />
+              <span className="gen-server-btns">
+                <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Video', kind: 'video' }) }}>從伺服器選影片</button>
+              </span>
+              {videoUrl ? (
+                <video
+                  className="gen-thumb gen-thumb-video"
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  onClick={(e) => e.preventDefault()}
+                  onMouseDown={(e) => e.preventDefault()}
+                />
+              ) : (
+                <div className="gen-thumb gen-thumb-empty">（請選擇影片）</div>
+              )}
+              {video && (
+                <span className="res-item-name">
+                  {video.kind === 'local' ? '（本機）' : '（伺服器）'}{video.name}
+                </span>
+              )}
+            </label>
+          </div>
+
+          <label className="gen-field">
+            <span className="gen-field-label">輸出格式</span>
+            <select className="res-select" value={fmt} disabled={busy} onChange={(e) => setFmt(e.target.value)}>
+              <option value="summary">摘要（文字檔）</option>
+              <option value="segments">分段摘要（文字檔）</option>
+              <option value="pptx">投影片（.pptx）</option>
+              <option value="pdf">PDF（.pdf）</option>
+              <option value="html">HTML 簡報（.html）</option>
+            </select>
+          </label>
+
+          {VTP_MODELS.length > 0 && (
+            <label className="gen-field">
+              <span className="gen-field-label">推理模型（要選哪個模型來產生）</span>
+              <select className="res-select" value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
+                {VTP_MODELS.map((m) => (
+                  <option key={m.id} value={m.id}>{m.label}（{m.id}）</option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          <label className="gen-field">
+            <span className="gen-field-label">思考模式 (think)</span>
+            <select className="res-select" value={think ? '1' : '0'} disabled={busy} onChange={(e) => setThink(e.target.value === '1')}>
+              <option value="1">啟用（模型先思考再回答）</option>
+              <option value="0">關閉（直接回答，不輸出思考）</option>
+            </select>
+          </label>
+
+          <label className="gen-field">
+            <span className="gen-field-label">目標模型（選填，讓摘要風格貼近該模型）</span>
+            <select className="res-select" value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">（通用，不指定）</option>
+              <optgroup label="生圖模型">
+                <option value="qwen-image">Qwen-Image</option>
+                <option value="flux">Flux.1</option>
+                <option value="sd">Stable Diffusion</option>
+                <option value="midjourney">Midjourney</option>
+                <option value="dalle">DALL-E 3</option>
+              </optgroup>
+              <optgroup label="生影片模型">
+                <option value="veo">Veo 3.1</option>
+                <option value="kling">Kling 3.0</option>
+                <option value="runway">Runway Gen-4.5</option>
+                <option value="wan">Wan 2.5</option>
+                <option value="hailuo">Hailuo / MiniMax</option>
+              </optgroup>
+            </select>
+          </label>
+
+          {isSlide && (
+            <Fragment>
+              <label className="gen-field">
+                <span className="gen-field-label">最大頁數</span>
+                <select className="res-select" value={maxSlides} disabled={busy} onChange={(e) => setMaxSlides(Number(e.target.value))}>
+                  <option value={4}>4 頁</option>
+                  <option value={6}>6 頁</option>
+                  <option value={10}>10 頁</option>
+                  <option value={15}>15 頁</option>
+                  <option value={20}>20 頁</option>
+                </select>
+              </label>
+              <label className="res-sub-toggle">
+                <input type="checkbox" checked={vision} disabled={busy} onChange={(e) => setVision(e.target.checked)} />
+                辨識影片內容（選配，較慢）
+              </label>
+            </Fragment>
+          )}
+
+          <p className="gen-hint">依字幕檔產生{fmtLabel}（無字幕會先做語音辨識{isSlide ? '，並擷取場景圖當素材' : ''}），結果存到「{outDir}」目錄。本機影片會先上傳到「影片」目錄。</p>
+
+          <div className="gen-server-btns">
+            <button type="button" className="res-tool-btn primary" onClick={submit} disabled={busy || !video}>{busy ? '產生中…' : '開始產生'}</button>
+          </div>
+
+          {status === 'running' && jobId && (
+            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
+              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
+              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
+            </div>
+          )}
+          {error && <p className="gen-error">{error}</p>}
+          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
+          {status === 'done' && (
+            <p className="gen-hint">完成! {fmtLabel} {out} 已產生，可在「{outDir}」分類開啟。</p>
+          )}
+        </div>
+      </section>
+
+      {picker && (
+        <ResourcesPicker
+          dir={picker.dir}
+          kind={picker.kind}
+          onClose={() => setPicker(null)}
+          onPickFile={(file, meta) => { setVideo({ kind: 'server', file, dir: meta.dir, sub: meta.sub, name: meta.name }); setPicker(null) }}
+        />
+      )}
+    </div>
   )
 }

@@ -1783,3 +1783,7 @@
 .sc-manual .ed-scrub { margin-top: 8px; }
 .sc-manual-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .sc-manual-grid .sc-fig { flex: 0 0 calc(25% - 8px); min-width: 90px; }
+
+.res-pick-card { align-items: center; text-align: center; gap: 6px; padding: 14px 8px; }
+.res-pick-card.selected { border-color: #06c755; box-shadow: 0 0 0 2px #b9e6cb; }
+.res-pick-icon { font-size: 30px; line-height: 1; }

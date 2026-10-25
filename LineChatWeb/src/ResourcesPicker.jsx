@@ -62,7 +62,7 @@ export default function ResourcesPicker({ dir, kind, onPickFile, onPickText, onC
         const blob = await res.blob()
         const ext = it.name.split('.').pop().toLowerCase()
         const file = new File([blob], it.name, { type: MIME[ext] || (kind === 'video' ? 'video/mp4' : 'image/png') })
-        onPickFile(file)
+        onPickFile(file, { dir, sub, name: it.name })
       }
     } catch (e) {
       setBusy('')

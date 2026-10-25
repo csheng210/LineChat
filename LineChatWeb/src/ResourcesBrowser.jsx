@@ -72,8 +72,6 @@ export default function ResourcesBrowser() {
   const [scItem, setScItem] = useState(null)
   const [trOpen, setTrOpen] = useState(false)
   const [trItem, setTrItem] = useState(null)
-  const [outOpen, setOutOpen] = useState(false)
-  const [outItem, setOutItem] = useState(null)
   const [auOpen, setAuOpen] = useState(false)
   const [auItem, setAuItem] = useState(null)
   const fileRef = useRef(null)
@@ -401,7 +399,6 @@ export default function ResourcesBrowser() {
                     <button className="res-card-edit" title="編輯影片" aria-label="編輯影片" onClick={(e) => { e.stopPropagation(); setEdItem(it); setEdOpen(true) }}>📝</button>
                     <button className="res-card-edit res-card-scene" title="場景關鍵畫面" aria-label="場景關鍵畫面" onClick={(e) => { e.stopPropagation(); setScItem(it); setScOpen(true) }}>🎬</button>
                     <button className="res-card-edit res-card-asr" title="語音轉字幕" aria-label="語音轉字幕" onClick={(e) => { e.stopPropagation(); setTrItem(it); setTrOpen(true) }}>🎙</button>
-                    <button className="res-card-edit res-card-report" title="影片產出" aria-label="影片產出" onClick={(e) => { e.stopPropagation(); setOutItem(it); setOutOpen(true) }}>🎞</button>
                     <button className="res-card-edit res-card-audio" title="加入/取代聲音" aria-label="加入/取代聲音" onClick={(e) => { e.stopPropagation(); setAuItem(it); setAuOpen(true) }}>🔊</button>
                   </Fragment>
                 )}
@@ -601,15 +598,6 @@ export default function ResourcesBrowser() {
           sub={sub}
           item={trItem}
           onClose={() => { setTrOpen(false); setTrItem(null) }}
-          onDone={() => refresh()}
-        />
-      )}
-      {outOpen && outItem && (
-        <VideoReport
-          dir={dir}
-          sub={sub}
-          item={outItem}
-          onClose={() => { setOutOpen(false); setOutItem(null) }}
           onDone={() => refresh()}
         />
       )}
@@ -1117,179 +1105,6 @@ function Transcriber({ dir, sub, item, onClose, onDone }) {
     </div>
   )
 }
-
-function VideoReport({ dir, sub, item, onClose, onDone }) {
-  const [fmt, setFmt] = useState('summary')
-  const [model, setModel] = useState(VTP_MODELS[0]?.id || '')
-  const [think, setThink] = useState(true)
-  const [target, setTarget] = useState('')
-  const [maxSlides, setMaxSlides] = useState(10)
-  const [vision, setVision] = useState(false)
-  const [jobId, setJobId] = useState('')
-  const [out, setOut] = useState('')
-  const [progress, setProgress] = useState(0)
-  const [status, setStatus] = useState('')
-  const [error, setError] = useState('')
-
-  const busy = !!jobId
-  const isSlide = fmt === 'pptx' || fmt === 'pdf' || fmt === 'html'
-
-  async function submit() {
-    const vtp = VTP_MODELS.find((m) => m.id === model) || VTP_MODELS[0]
-    if (!vtp) { setError('請先選擇模型'); return }
-    setError(''); setStatus('running'); setProgress(0); setOut('')
-    const fd = new FormData()
-    fd.append('dir', dir)
-    fd.append('sub', sub || '')
-    fd.append('name', item.name)
-    fd.append('fmt', fmt)
-    fd.append('base_url', vtp.base_url)
-    fd.append('model', vtp.id)
-    fd.append('api_key', vtp.api_key)
-    fd.append('target', target)
-    fd.append('enable_thinking', think ? 'true' : 'false')
-    if (isSlide) {
-      fd.append('max_slides', String(maxSlides))
-      fd.append('vision', vision ? '1' : '0')
-    }
-    try {
-      const r = await fetch('/comfy/resources/video-report', { method: 'POST', body: fd })
-      const d = await r.json().catch(() => ({}))
-      if (!r.ok) { setStatus('error'); setError('失敗: ' + (d.detail || r.status)); return }
-      setJobId(d.job_id); setOut(d.out || '')
-    } catch (e) {
-      setStatus('error'); setError('請求失敗')
-    }
-  }
-
-  useEffect(() => {
-    if (!jobId) return
-    let stopped = false
-    const tick = async () => {
-      try {
-        const r = await fetch('/comfy/job?id=' + encodeURIComponent(jobId))
-        const d = await r.json()
-        if (stopped) return
-        setProgress(d.progress || 0)
-        if (d.status === 'done') {
-          setStatus('done'); setJobId(''); onDone()
-        } else if (d.status === 'error') {
-          setStatus('error'); setError(d.error || '產生失敗'); setJobId('')
-        } else if (d.status === 'cancelled') {
-          setStatus('cancelled'); setJobId('')
-        }
-      } catch (e) { if (!stopped) { setStatus('error'); setError('輪詢失敗'); setJobId('') } }
-    }
-    const t = setInterval(tick, 1500)
-    tick()
-    return () => { stopped = true; clearInterval(t) }
-  }, [jobId])
-
-  const fmtLabel = { summary: '摘要', segments: '分段摘要', pptx: '投影片 PPTX', pdf: 'PDF', html: 'HTML 簡報' }[fmt]
-  const outDir = (fmt === 'summary' || fmt === 'segments') ? '提示詞' : '影片'
-
-  return (
-    <div className="res-modal" onClick={() => { if (!busy) onClose() }} role="dialog" aria-modal="true">
-      <div className="res-modal-box res-editor-box" onClick={(e) => e.stopPropagation()}>
-        <div className="res-modal-head">
-          <span className="res-modal-title">影片產出</span>
-          <button className="res-tool-btn primary ed-confirm-btn" onClick={submit} disabled={busy}>{busy ? '產生中…' : '開始產生'}</button>
-          <button className="res-modal-close" onClick={() => { if (!busy) onClose() }} aria-label="關閉">✕</button>
-        </div>
-        <div className="res-editor-body">
-          <p className="gen-hint">{item.name}</p>
-
-          <label className="res-prompt-label">
-            輸出格式
-            <select className="res-select" value={fmt} disabled={busy} onChange={(e) => setFmt(e.target.value)}>
-              <option value="summary">摘要（文字檔）</option>
-              <option value="segments">分段摘要（文字檔）</option>
-              <option value="pptx">投影片（.pptx）</option>
-              <option value="pdf">PDF（.pdf）</option>
-              <option value="html">HTML 簡報（.html）</option>
-            </select>
-          </label>
-
-          <label className="res-prompt-label">
-            推理模型（要選哪個模型來產生）
-            <select className="res-select" value={model} disabled={busy} onChange={(e) => setModel(e.target.value)}>
-              {VTP_MODELS.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}（{m.id}）</option>
-              ))}
-            </select>
-          </label>
-
-          <label className="res-prompt-label">
-            思考模式 (think)
-            <select className="res-select" value={think ? '1' : '0'} disabled={busy} onChange={(e) => setThink(e.target.value === '1')}>
-              <option value="1">啟用（模型先思考再回答）</option>
-              <option value="0">關閉（直接回答, 不輸出思考）</option>
-            </select>
-          </label>
-
-          <label className="res-prompt-label">
-            目標模型（選填, 讓內容風格貼近該模型）
-            <select className="res-select" value={target} disabled={busy} onChange={(e) => setTarget(e.target.value)}>
-              <option value="">（通用, 不指定）</option>
-              <optgroup label="生圖模型">
-                <option value="qwen-image">Qwen-Image</option>
-                <option value="flux">Flux.1</option>
-                <option value="sd">Stable Diffusion</option>
-                <option value="midjourney">Midjourney</option>
-                <option value="dalle">DALL-E 3</option>
-              </optgroup>
-              <optgroup label="生影片模型">
-                <option value="veo">Veo 3.1</option>
-                <option value="kling">Kling 3.0</option>
-                <option value="runway">Runway Gen-4.5</option>
-                <option value="wan">Wan 2.5</option>
-                <option value="hailuo">Hailuo / MiniMax</option>
-              </optgroup>
-            </select>
-          </label>
-
-          {isSlide && (
-            <Fragment>
-              <label className="res-prompt-label">
-                最大頁數
-                <select className="res-select" value={maxSlides} disabled={busy} onChange={(e) => setMaxSlides(Number(e.target.value))}>
-                  <option value={4}>4 頁</option>
-                  <option value={6}>6 頁</option>
-                  <option value={10}>10 頁</option>
-                  <option value={15}>15 頁</option>
-                  <option value={20}>20 頁</option>
-                </select>
-              </label>
-              <label className="res-sub-toggle">
-                <input type="checkbox" checked={vision} disabled={busy} onChange={(e) => setVision(e.target.checked)} />
-                辨識圖片內容（選配，較慢）
-              </label>
-            </Fragment>
-          )}
-
-          <p className="gen-hint">依字幕檔產生{fmtLabel}（無字幕會先做語音辨識{isSlide ? '，並擷取場景圖當素材' : ''}），結果存到「{outDir}」目錄。</p>
-
-          {status === 'running' && jobId && (
-            <div className="gen-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(progress * 100)}>
-              <div className="gen-progress-track"><div className="gen-progress-fill" style={{ width: Math.round(progress * 100) + '%' }} /></div>
-              <span className="gen-progress-pct">{Math.round(progress * 100)}%</span>
-            </div>
-          )}
-          {error && <p className="gen-error">{error}</p>}
-          {status === 'cancelled' && <p className="gen-hint">已取消。</p>}
-          {status === 'done' && (
-            <p className="gen-hint">完成! {fmtLabel} {out} 已產生，可在「{outDir}」分頁開啟。</p>
-          )}
-
-          <div className="res-prompt-actions">
-            <button className="res-tool-btn" onClick={onClose} disabled={busy}>關閉</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 
 function VideoAudio({ dir, sub, item, onClose, onDone }) {
   const [mode, setMode] = useState('replace')

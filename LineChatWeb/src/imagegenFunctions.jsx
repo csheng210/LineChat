@@ -133,6 +133,18 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'videoReport',
+    label: '影片產出摘要',
+    desc: '從 Resources 挑影片 → 依字幕產生摘要，存到提示詞目錄',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="12" rx="2" />
+        <path d="m10 8 4 2-4 2z" />
+        <path d="M6 20h12M9 23h6" />
+      </svg>
+    ),
+  },
+  {
     id: 'chat',
     label: '模型聊天',
     desc: '輸入文字問模型, 可儲存/載入聊天紀錄',
