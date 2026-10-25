@@ -11,7 +11,7 @@
   },
   "2": {
     "inputs": {
-      "clip_name": "qwen3vl_32b_h3_ultra_uncensored_heretic_bf16.safetensors",
+      "clip_name": "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
       "type": "minimax",
       "device": "default"
     },

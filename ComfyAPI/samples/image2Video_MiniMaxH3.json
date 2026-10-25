@@ -181,7 +181,7 @@
   },
   "105:13": {
     "inputs": {
-      "clip_name": "qwen3vl_32b_h3_ultra_uncensored_heretic_bf16.safetensors",
+      "clip_name": "qwen3vl_32b_heretic_minimax_h3_nvfp4.safetensors",
       "type": "minimax",
       "device": "default"
     },
@@ -192,7 +192,7 @@
   },
   "105:15": {
     "inputs": {
-      "noise_seed": 463808061888991
+      "noise_seed": 448232748314344
     },
     "class_type": "RandomNoise",
     "_meta": {
