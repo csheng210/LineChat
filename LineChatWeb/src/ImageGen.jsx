@@ -102,6 +102,15 @@ async function fetchVideoThumb(file) {
   })
 }
 
+// 過濾模型輸出裡的思考標籤 <think>…</think>（含 <thinking> 變體）與其內容。
+function stripThink(text) {
+  if (!text) return text
+  return String(text)
+    .replace(/<think(?:ing)?[\s\S]*?<\/think(?:ing)?>/gi, '')
+    .replace(/<\/?think(?:ing)?>/gi, '')
+    .trim()
+}
+
 export default function ImageGen({ active }) {
   const snap = useSyncExternalStore(subscribe, getSnapshot)
   const form = snap.forms[active] || DEFAULT_FORM
@@ -259,7 +268,7 @@ export default function ImageGen({ active }) {
   async function copyPrompt() {
     if (!result?.prompt) return
     try {
-      await navigator.clipboard.writeText(result.prompt)
+      await navigator.clipboard.writeText(stripThink(result.prompt))
       setCopied(true)
       setTimeout(() => setCopied(false), 1800)
     } catch {
@@ -507,7 +516,7 @@ export default function ImageGen({ active }) {
               ) : (
                 <div className="gen-result-prompt gen-result-prompt-only">
                   <div className="gen-result-prompt-title">反推提示詞</div>
-                  <p>{result.prompt}</p>
+                  <p>{stripThink(result.prompt)}</p>
                 </div>
               )}
               {result.prompt && (result.image || result.video) && (

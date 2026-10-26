@@ -1,3 +1,4 @@
+from __future__ import annotations
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """ComfyUI custom node: reverse-engineer a prompt from an image or a video.
@@ -14,7 +15,7 @@ Config (base_url / model / api_key) is supplied by the workflow's node widgets;
 this node keeps no hardcoded model info. The workflow JSON is the source of
 truth, and the caller (front-end -> API) overrides the widgets per run.
 """
-from __future__ import annotations
+
 
 import base64
 import io
@@ -24,6 +25,8 @@ import time
 
 import numpy as np
 from PIL import Image
+# Pillow 9.1+ 將 LANCZOS 移到 Image.Resampling；舊版退回 Image.LANCZOS。
+_RESAMPLE_LANCZOS = getattr(Image, "Resampling", Image).LANCZOS  # type: ignore[attr-defined]
 import requests
 
 
@@ -87,7 +90,7 @@ def _encode_jpeg(pil, max_side, jpeg_quality):
     w, h = pil.size
     scale = max_side / max(w, h)
     if scale < 1:
-        pil = pil.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+        pil = pil.resize((max(1, int(w * scale)), max(1, int(h * scale))), _RESAMPLE_LANCZOS)
     buf = io.BytesIO()
     pil.save(buf, "JPEG", quality=jpeg_quality)
     return buf.getvalue()

@@ -27,6 +27,7 @@ ComfyUI 生圖服務（FastAPI）
 import base64
 import json
 import os
+import re
 import shutil
 
 def _rmtree_long(path):
@@ -2269,6 +2270,19 @@ def job_upscale(
     return {"job_id": job_id}
 
 
+# 過濾模型輸出裡的思考標籤 <think>…</think>（含 <thinking> 變體與帶屬性的標籤）與其內容。
+_THINK_BLOCK_RE = re.compile(r"<think(?:ing)?[^>]*>[\s\S]*?</think(?:ing)?[^>]*>", re.IGNORECASE)
+_THINK_TAG_RE = re.compile(r"</?think(?:ing)?[^>]*>", re.IGNORECASE)
+
+
+def _strip_think(text):
+    if not text:
+        return text
+    t = _THINK_BLOCK_RE.sub("", text)
+    t = _THINK_TAG_RE.sub("", t)
+    return t.strip()
+
+
 def _start_prompt_job(job_id, runner):
     """反推提示詞任務: 走 ComfyUI ReversePrompt 工作流, runner(cb, cancel_event, prompt_id_cb) 回傳提示詞字串。"""
     with JOBS_LOCK:
@@ -2295,7 +2309,7 @@ def _start_prompt_job(job_id, runner):
                 j["status"] = "running"
                 j["progress"] = 0.05
         try:
-            prompt = runner(progress_cb, cancel_event, prompt_id_cb)
+            prompt = _strip_think(runner(progress_cb, cancel_event, prompt_id_cb))
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
                 if j:
