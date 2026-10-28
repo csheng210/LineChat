@@ -127,6 +127,7 @@ export default function ImageGen({ active }) {
   const isRefMode = active === 'refmodeT2v'
   const isIv2v = active === 'iv2v'
   const isVideo2Refmod = active === 'video2refmod'
+  const isRefmodV2v = active === 'refmodV2v'
   const [copied, setCopied] = useState(false)
   const [videoUrl, setVideoUrl] = useState('') // 反推提示詞選影片: 內嵌播放器用的來源 URL
   const [picker, setPicker] = useState(null) // { dir, kind, slot } 伺服器 Resources 選取彈窗
@@ -134,12 +135,12 @@ export default function ImageGen({ active }) {
   const [aspectRatios, setAspectRatios] = useState([]) // 參考模型-文生影片: 可選長寬比
 
   useEffect(() => {
-    if ((!isRefMode && !isIv2v) || mods.length) return
+    if ((!isRefMode && !isIv2v && !isRefmodV2v) || mods.length) return
     fetch('/comfy/refmode/mods')
       .then((res) => (res.ok ? res.json() : Promise.reject(res)))
       .then((d) => { setMods(Array.isArray(d.mods) ? d.mods : []); setAspectRatios(Array.isArray(d.aspect_ratios) ? d.aspect_ratios : []) })
       .catch(() => { setMods([]); setAspectRatios([]) })
-  }, [isRefMode, isIv2v, mods.length])
+  }, [isRefMode, isIv2v, isRefmodV2v, mods.length])
 
   // 選到影片時產生可播放來源(object URL), 換檔/卸載時釋放, 讓預覽用播放器而非縮圖
   useEffect(() => {
@@ -185,9 +186,10 @@ export default function ImageGen({ active }) {
   }
 
   function validate() {
-    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'images2video' && active !== 'reversePrompt' && active !== 'iv2v' && active !== 'video2refmod' && !prompt.trim()) return '請輸入提示詞'
+    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'images2video' && active !== 'reversePrompt' && active !== 'iv2v' && active !== 'video2refmod' && active !== 'refmodV2v' && !prompt.trim()) return '請輸入提示詞'
     if (active === 'reversePrompt') return image1 ? '' : '請選擇圖片或影片'
     if (isVideo2Refmod) return image1 ? '' : '請選擇來源影片'
+    if (isRefmodV2v) return image1 ? '' : '請選擇來源影片'
     if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
@@ -215,6 +217,14 @@ export default function ImageGen({ active }) {
       fd.append('aspect_ratio', refAspect)
       fd.append('megapixels', String(Number(refMega)))
       return { endpoint: '/job/iv2v', form: fd }
+    }
+    if (active === 'refmodV2v') {
+      const fd = new FormData()
+      fd.append('video', image1)
+      fd.append('mod', refMod)
+      if (prompt.trim()) fd.append('prompt', prompt.trim())
+      if (seed !== '' && seed != null) fd.append('seed', String(Number(seed)))
+      return { endpoint: '/job/refmod_v2v', form: fd }
     }
     if (active === 'video2refmod') {
       const fd = new FormData()
@@ -322,8 +332,8 @@ export default function ImageGen({ active }) {
   if (active === 'videoReport') return <VideoReportPage />
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
-  const showDuration = isVideo || isFl2v || isRefMode || isIv2v // 影片類功能才顯示秒數
-  const showImages = active === 'image1' || active === 'image2' || isVideo || isFl2v || active === 'bgremove' || active === 'upscale' || isReverse || isIv2v || isVideo2Refmod
+  const showDuration = isVideo || isFl2v || isRefMode || isIv2v // 影片類功能才顯示秒數（refmodV2v 秒數由來源影片決定）
+  const showImages = active === 'image1' || active === 'image2' || isVideo || isFl2v || active === 'bgremove' || active === 'upscale' || isReverse || isIv2v || isVideo2Refmod || isRefmodV2v
   const pct = Math.round(progress * 100)
 
   return (
@@ -339,16 +349,16 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {isVideo2Refmod ? '來源影片' : isIv2v ? '參考圖（要換成的人物）' : isReverse ? '輸入圖/影片' : isFl2v ? '首圖（第一幀）' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {(isVideo2Refmod || isRefmodV2v) ? '來源影片' : isIv2v ? '參考圖（要換成的人物）' : isReverse ? '輸入圖/影片' : isFl2v ? '首圖（第一幀）' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
-                  accept={isVideo2Refmod ? 'video/*' : isReverse ? 'image/*,video/*' : 'image/*'}
+                  accept={(isVideo2Refmod || isRefmodV2v) ? 'video/*' : isReverse ? 'image/*,video/*' : 'image/*'}
                   onChange={(e) => onPickImage(1, e.target.files[0])}
                 />
                 <span className="gen-server-btns">
                   <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Image', kind: 'image', slot: 1 }) }}>從伺服器選圖</button>
-                  {(isReverse || isVideo2Refmod) && (
+                  {(isReverse || isVideo2Refmod || isRefmodV2v) && (
                     <button type="button" className="gen-server-btn" onClick={(e) => { e.preventDefault(); setPicker({ dir: 'Video', kind: 'video', slot: 1 }) }}>從伺服器選影片</button>
                   )}
                 </span>
@@ -367,7 +377,7 @@ export default function ImageGen({ active }) {
                     <img className="gen-thumb" src={preview1} alt="輸入預覽" />
                   )
                 ) : (
-                  <div className="gen-thumb gen-thumb-empty">{isVideo2Refmod ? '＋ 選擇影片' : isReverse ? '＋ 選擇圖片/影片' : '＋ 選擇圖片'}</div>
+                  <div className="gen-thumb gen-thumb-empty">{(isVideo2Refmod || isRefmodV2v) ? '＋ 選擇影片' : isReverse ? '＋ 選擇圖片/影片' : '＋ 選擇圖片'}</div>
                 )}
               </label>
               {(active === 'image2' || isFl2v || isIv2v) && (
@@ -387,6 +397,20 @@ export default function ImageGen({ active }) {
                 </label>
               )}
             </div>
+          )}
+
+          {isRefmodV2v && (
+            <Fragment>
+            <label className="gen-field">
+              <span className="gen-field-label">參考模型 MOD（來源影片要套用的角色/風格）</span>
+              <select className="gen-textarea" value={refMod} onChange={(e) => setForm(active, { refMod: e.target.value })}>
+                {mods.length === 0 && <option value={refMod}>{refMod}</option>}
+                {mods.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </label>
+            </Fragment>
           )}
 
           {isVideo2Refmod && (
@@ -495,7 +519,7 @@ export default function ImageGen({ active }) {
               <textarea
                 className="gen-textarea"
                 rows={3}
-                placeholder={isFl2v ? '選填: 描述首圖到尾圖的動作/鏡頭變化, 例: 鏡頭緩慢推進, 人物轉身' : (isVideo || isTextVideo) ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : isRefMode ? '描述參考角色要做的動作/場景，例: 角色自信地走向鏡頭，穿越霓虹雨夜小巷' : isIv2v ? '留空即用預設替換提示；可自訂，例: 只替換前景女子，保留鏡頭/背景/其他人物' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
+                placeholder={isFl2v ? '選填: 描述首圖到尾圖的動作/鏡頭變化, 例: 鏡頭緩慢推進, 人物轉身' : (isVideo || isTextVideo) ? '留空即用預設影片提示(黃昏咖啡館，15 秒)；可自訂，例: 鏡頭緩慢推進，抱枕輕輕晃動' : isRefMode ? '描述參考角色要做的動作/場景，例: 角色自信地走向鏡頭，穿越霓虹雨夜小巷' : isRefmodV2v ? '描述套用參考模型後的動作/場景變化，例: 角色在雨中跳舞，鏡頭環繞' : isIv2v ? '留空即用預設替換提示；可自訂，例: 只替換前景女子，保留鏡頭/背景/其他人物' : (active === 'bgremove' ? '留空即用預設去背提示；可自訂，例: 去背並保留髮絲細節' : (active === 'upscale' ? '留空即用預設放大提示；可自訂，例: 增強細節與銳利度' : '例: 將圖片的沙發換成紅色'))}
                 value={prompt}
                 onChange={(e) => setForm(active, { prompt: e.target.value })}
               />

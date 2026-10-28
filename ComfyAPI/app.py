@@ -86,6 +86,7 @@ import run_ref2video
 import run_refmode_t2v
 import run_iv2v
 import run_video2refmod
+import run_refmod_video2video
 import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
@@ -2387,6 +2388,38 @@ def job_video2refmod(
                 pass
 
     _start_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/job/refmod_v2v")
+def job_refmod_v2v(
+    video: UploadFile = File(...),
+    mod: Optional[str] = Form("character/woman"),
+    prompt: Optional[str] = Form(None),
+    duration: Optional[int] = Form(5),
+    seed: Optional[int] = Form(-1),
+    aspect_ratio: Optional[str] = Form("9:16 (Portrait Widescreen)"),
+    megapixels: Optional[float] = Form(1.0),
+):
+    d_vid = video.file.read()
+    if not d_vid:
+        raise HTTPException(status_code=400, detail="video 不可為空")
+    p_vid = _temp_upload(d_vid, video.filename, ".mp4")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_refmod_video2video.generate(
+                video_path=p_vid, mod=mod, prompt=prompt, duration=duration, seed=seed,
+                aspect_ratio=aspect_ratio, megapixels=megapixels,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(p_vid)
+            except OSError:
+                pass
+
+    _start_video_job(job_id, runner)
     return {"job_id": job_id}
 
 
