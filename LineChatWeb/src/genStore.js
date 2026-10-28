@@ -25,6 +25,11 @@ export const DEFAULT_FORM = {
   target: '', // 反推提示詞: 目標模型預設(image/video)
   vtpModel: 'qwen3.8-27b-uncensored', // 反推提示詞: 反推用的 VLM 模型(對應 base_url/api_key, 見 ImageGen 的 VTP_MODELS)
   vtpThink: true, // 反推提示詞: 是否啟用模型的 think(思考)模式
+  refMod: 'character/woman', // 參考模型-文生影片: 選取的參考 MOD
+  refAspect: '16:9 (Widescreen)', // 參考模型-文生影片: 輸出長寬比
+  refMega: 1, // 參考模型-文生影片: 目標百萬畫素(megapixels)
+  trackText: 'girl in pink dress', // 參考圖片-影片生影片: 來源影片中要追蹤/替換的對象描述
+  refModName: 'walkgirl', // 參考影片-生模型參考: 輸出的模型參考檔名
   // 輸入圖/影片的原檔 dataURL 與中繼資料: 供重新整理後還原成 File(圖片可直接還原; 影片超量時退回縮圖預覽)。
   fileData1: '',
   fileData2: '',
@@ -191,8 +196,10 @@ async function pollJob(id, jobId) {
       if (data.status === 'done') {
         const out = data.video_base64
           ? { video: 'data:video/mp4;base64,' + data.video_base64 }
-          : data.image_base64
-            ? { image: 'data:image/png;base64,' + data.image_base64, prompt: data.prompt || '' }
+          : Array.isArray(data.images_base64) && data.images_base64.length
+            ? { images: data.images_base64.map((b) => 'data:image/png;base64,' + b), image: 'data:image/png;base64,' + data.images_base64[0], prompt: data.prompt || '' }
+            : data.image_base64
+              ? { image: 'data:image/png;base64,' + data.image_base64, prompt: data.prompt || '' }
             : data.prompt
               ? { prompt: data.prompt }
               : null

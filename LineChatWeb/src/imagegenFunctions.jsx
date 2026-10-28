@@ -88,6 +88,42 @@ export const FUNCTIONS = [
     ),
   },
   {
+    id: 'refmodeT2v',
+    label: '參考模型-文生影片',
+    desc: '選參考 MOD + 提示詞, 產出一段影片',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="8" r="4" />
+        <path d="M4 21a8 8 0 0 1 16 0" />
+        <path d="m17 4 1.5 1.5L21 3" />
+      </svg>
+    ),
+  },
+  {
+    id: 'iv2v',
+    label: '參考圖片-影片生影片',
+    desc: '參考圖 + 來源影片, 換掉片中人物產出新影片',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="16" rx="2" />
+        <path d="m10 9 5 3-5 3z" />
+        <circle cx="7" cy="8" r="2" />
+      </svg>
+    ),
+  },
+  {
+    id: 'video2refmod',
+    label: '参考影片-生模型参考',
+    desc: '一段影片 → 抽取服务器端模型参考档(RefMod)',
+    icon: (
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="4" width="20" height="12" rx="2" />
+        <path d="m9 7 4 2-4 2z" />
+        <path d="M12 16v5M8 21h8" />
+      </svg>
+    ),
+  },
+  {
     id: 'reversePrompt',
     label: '反推提示詞',
     desc: '一張圖或一段影片 → 反推出一段提示詞',

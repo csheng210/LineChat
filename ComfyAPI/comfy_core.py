@@ -258,7 +258,7 @@ def get_output_image_bytes(outputs: dict, save_node: str) -> bytes:
 def get_output_video_bytes(outputs: dict, save_node: str) -> bytes:
     """從 outputs 取輸出影片 bytes。SaveVideo 可能放在 videos 或 images 鍵(檔名 .mp4)。"""
     def pick(d):
-        return d.get("videos") or d.get("images")
+        return d.get("videos") or d.get("gifs") or d.get("images")
     vids = pick(outputs.get(save_node, {}))
     if not vids:
         for out in outputs.values():

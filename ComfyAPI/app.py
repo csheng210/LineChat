@@ -83,6 +83,9 @@ import run_image2video
 import run_text2video
 import run_images2video
 import run_ref2video
+import run_refmode_t2v
+import run_iv2v
+import run_video2refmod
 import run_bgremove_qwen
 import run_upscale_qwen
 import run_video2prompt as rvp
@@ -113,6 +116,14 @@ class Text2VideoRequest(BaseModel):
     height: Optional[int] = 480
     seed: Optional[int] = -1
     as_json: Optional[bool] = False
+
+class RefmodeT2vRequest(BaseModel):
+    prompt: str
+    mod: Optional[str] = "character/woman"
+    duration: Optional[int] = 8
+    seed: Optional[int] = -1
+    aspect_ratio: Optional[str] = "16:9 (Widescreen)"
+    megapixels: Optional[float] = 1.0
 
 
 def _temp_png(data: bytes) -> str:
@@ -1770,7 +1781,7 @@ def _new_job():
     job_id = uuid.uuid4().hex
     with JOBS_LOCK:
         JOBS[job_id] = {
-            "status": "queued", "progress": 0.0, "image_base64": None, "video_base64": None, "prompt": "",
+            "status": "queued", "progress": 0.0, "image_base64": None, "images_base64": None, "video_base64": None, "prompt": "",
             "error": None, "cancel_event": threading.Event(), "prompt_id": None,
         }
     return job_id
@@ -1812,6 +1823,61 @@ def _start_job(job_id, runner):
             _save_resource("Image", image_bytes, ".png")
             if out_prompt:
                 _save_resource("Prompt", out_prompt.encode("utf-8"), ".txt")
+        except core.CancelledError:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "cancelled"
+        except Exception as e:
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "error"
+                    j["error"] = str(e)
+
+    threading.Thread(target=worker, daemon=True).start()
+
+
+def _start_images_job(job_id, runner):
+    # runner 回傳 (list[image_bytes], saved_path_str): 多張預覽圖 + 伺服器端存檔路徑
+    with JOBS_LOCK:
+        cancel_event = JOBS[job_id]["cancel_event"]
+
+    def prompt_id_cb(pid):
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["prompt_id"] = pid
+
+    def progress_cb(value, max_value):
+        if max_value and max_value > 0:
+            frac = max(0.0, min(1.0, value / max_value))
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j and j["status"] == "running":
+                    j["progress"] = round(frac * 0.95, 4)
+
+    def worker():
+        with JOBS_LOCK:
+            j = JOBS.get(job_id)
+            if j:
+                j["status"] = "running"
+        try:
+            image_list, saved_path = runner(progress_cb, cancel_event, prompt_id_cb)
+            if not isinstance(image_list, (list, tuple)):
+                image_list = [image_list]
+            b64_list = [base64.b64encode(b).decode("ascii") for b in image_list if b]
+            with JOBS_LOCK:
+                j = JOBS.get(job_id)
+                if j:
+                    j["status"] = "done"
+                    j["progress"] = 1.0
+                    j["images_base64"] = b64_list
+                    j["image_base64"] = b64_list[0] if b64_list else None
+                    j["prompt"] = saved_path or ""
+            for b in image_list:
+                if b:
+                    _save_resource("Image", b, ".png")
         except core.CancelledError:
             with JOBS_LOCK:
                 j = JOBS.get(job_id)
@@ -1992,7 +2058,7 @@ def job_status(id: str):
             raise HTTPException(status_code=404, detail="job not found")
         return {
             "status": j["status"], "progress": j["progress"],
-            "image_base64": j["image_base64"], "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"], "scenes": j.get("scenes"), "subtitle": j.get("subtitle"),
+            "image_base64": j["image_base64"], "images_base64": j.get("images_base64"), "video_base64": j.get("video_base64"), "prompt": j["prompt"], "error": j["error"], "scenes": j.get("scenes"), "subtitle": j.get("subtitle"),
         }
 
 
@@ -2211,6 +2277,116 @@ def job_text2video(req: Text2VideoRequest):
     _start_video_job(job_id, lambda cb, cancel_event, prompt_id_cb: run_text2video.generate(
         prompt=req.prompt, duration=req.duration, width=req.width, height=req.height,
         seed=req.seed, log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb))
+    return {"job_id": job_id}
+
+
+@app.get("/refmode/mods")
+def refmode_mods():
+    """代理 ComfyUI /object_info，回傳 MiniMaxH3RefModsLoader 的 mod_1 可選清單（不寫死）。"""
+    try:
+        r = requests.get(f"{core.HTTP_BASE}/object_info/MiniMaxH3RefModsLoader", timeout=20)
+    except requests.RequestException as e:
+        raise HTTPException(status_code=502, detail=f"無法連線 ComfyUI: {e}")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail="ComfyUI /object_info 回應異常")
+    try:
+        info = r.json().get("MiniMaxH3RefModsLoader", {})
+        combo = info.get("input", {}).get("required", {}).get("mod_1", [])
+        options = combo[0] if isinstance(combo, list) and combo and isinstance(combo[0], list) else []
+    except (ValueError, TypeError, KeyError):
+        raise HTTPException(status_code=502, detail="解析 MOD 清單失敗")
+    mods = [m for m in options if m and m != "(none)"]
+    aspect_ratios = []
+    try:
+        r2 = requests.get(f"{core.HTTP_BASE}/object_info/ResolutionSelector", timeout=20)
+        if r2.status_code == 200:
+            ar = (r2.json().get("ResolutionSelector", {}).get("input", {})
+                  .get("required", {}).get("aspect_ratio", []))
+            if isinstance(ar, list) and len(ar) > 1 and isinstance(ar[1], dict):
+                aspect_ratios = ar[1].get("options", [])
+    except (requests.RequestException, ValueError, TypeError, KeyError):
+        aspect_ratios = []
+    return {"mods": mods, "default": "character/woman", "aspect_ratios": aspect_ratios,
+            "default_aspect_ratio": "16:9 (Widescreen)", "megapixels_default": 1.0}
+
+
+@app.post("/job/refmode_t2v")
+def job_refmode_t2v(req: RefmodeT2vRequest):
+    job_id = _new_job()
+    _start_video_job(job_id, lambda cb, cancel_event, prompt_id_cb: run_refmode_t2v.generate(
+        prompt=req.prompt, mod=req.mod, duration=req.duration, seed=req.seed,
+        aspect_ratio=req.aspect_ratio, megapixels=req.megapixels,
+        log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb))
+    return {"job_id": job_id}
+
+
+@app.post("/job/iv2v")
+def job_iv2v(
+    image: UploadFile = File(...),
+    video: UploadFile = File(...),
+    prompt: Optional[str] = Form(None),
+    track_text: Optional[str] = Form(None),
+    duration: Optional[int] = Form(10),
+    seed: Optional[int] = Form(-1),
+    aspect_ratio: Optional[str] = Form("9:16 (Portrait Widescreen)"),
+    megapixels: Optional[float] = Form(1.0),
+):
+    d_img = image.file.read()
+    d_vid = video.file.read()
+    if not d_img or not d_vid:
+        raise HTTPException(status_code=400, detail="image/video 不可為空")
+    p_img = _temp_upload(d_img, image.filename, ".png")
+    p_vid = _temp_upload(d_vid, video.filename, ".mp4")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_iv2v.generate(
+                image_path=p_img, video_path=p_vid, prompt=prompt, track_text=track_text,
+                duration=duration, seed=seed, aspect_ratio=aspect_ratio, megapixels=megapixels,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            for pth in (p_img, p_vid):
+                try:
+                    os.remove(pth)
+                except OSError:
+                    pass
+
+    _start_video_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/job/video2refmod")
+def job_video2refmod(
+    video: UploadFile = File(...),
+    name: Optional[str] = Form("walkgirl"),
+    ref_resolution: Optional[int] = Form(1024),
+    mode: Optional[str] = Form("Full Reference"),
+    concept_type: Optional[str] = Form("identity"),
+    identity: Optional[int] = Form(None),
+    frame_load_cap: Optional[int] = Form(None),
+    skip_first_frames: Optional[int] = Form(None),
+):
+    d_vid = video.file.read()
+    if not d_vid:
+        raise HTTPException(status_code=400, detail="video 不可為空")
+    p_vid = _temp_upload(d_vid, video.filename, ".mp4")
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_video2refmod.generate(
+                video_path=p_vid, name=name, ref_resolution=ref_resolution, mode=mode,
+                concept_type=concept_type, identity=identity, frame_load_cap=frame_load_cap,
+                skip_first_frames=skip_first_frames,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(p_vid)
+            except OSError:
+                pass
+
+    _start_job(job_id, runner)
     return {"job_id": job_id}
 
 
