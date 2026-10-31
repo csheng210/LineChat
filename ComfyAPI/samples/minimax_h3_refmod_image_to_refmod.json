@@ -1,0 +1,380 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "qwen_image_2.1_int8_convrot.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "Qwen UNET Loader"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen3vl_8b_int8_convrot.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "Qwen CLIP Loader"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "qwen_image_2.1_vae_bf16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "Qwen VAE Loader"
+    }
+  },
+  "4": {
+    "inputs": {
+      "device": "auto",
+      "dtype": "default",
+      "model": [
+        "1",
+        0
+      ]
+    },
+    "class_type": "QwenImage21Cache",
+    "_meta": {
+      "title": "Qwen Image 2.1 Cache"
+    }
+  },
+  "5": {
+    "inputs": {
+      "prompt": "以输入的人物参考图为唯一身份依据，保持同一人物的五官、脸型、发型、发色、肤色与服装一致。生成正面上半身特写，取景从头顶到胸部下方，身体正对镜头，头部轻微侧倾，双眼直视镜头，嘴唇自然闭合，表情平静。完整保留头顶和双肩，人物居中，纯白背景，柔和均匀的摄影棚光线，写实摄影，竖版3:4，单张图中只有一个人物，无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官、脸型、发型、发色、肤色与服装一致。生成四分之三侧面上半身特写，取景从头顶到胸部下方，身体向画面右侧转动约45度，头部略微转回镜头，双眼看向镜头，展示脸部轮廓与肩颈的立体关系，嘴唇自然闭合。完整保留头顶和双肩，纯白背景，柔和均匀的摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官、脸型、发型、发色、肤色、服装和身材比例一致。生成正面半身至大腿中段的人物照，身体正对镜头，站姿自然，肩膀放松，双臂自然垂在身体两侧，双手完整入镜，目光看向镜头，表情平静。完整保留头顶，人物居中，纯白背景，柔和均匀的摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官、脸型、发型、发色、肤色、服装和身材比例一致。生成严格90度侧面的全身站姿照，人物面朝画面右侧，头部与身体朝向一致，不转头看镜头，清楚呈现额头、鼻尖、嘴唇、下巴及身体侧面轮廓。身体自然直立，双臂自然下垂，双腿伸直，双脚平放地面。从头顶到鞋底完整入镜，上下留少量空白，纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的发型、发色、肤色、服装和身材比例一致。生成严格背面的全身站姿照，人物背对镜头，头部朝向正前方，不回头，不露出正脸，清楚展示后脑发型、肩背轮廓及服装背面，服装背面设计与参考图风格合理一致。双臂自然垂在两侧，双腿自然站立，双脚平放地面。从头顶到鞋底完整入镜，上下留少量空白，纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官、脸型、发型、发色、肤色、服装和身材比例一致。生成严格正面的全身站姿照，头部与身体正对镜头，目光平视镜头，肩膀自然放松，双臂自然垂在身体两侧，双手可见，双腿自然伸直，双脚小幅分开。站姿端正自然，不扭胯，不使用夸张透视。从头顶到鞋底完整入镜，上下留少量空白，纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官结构、脸型、发型、发色、肤色与服装一致，仅改变面部表情。生成正面头肩特写，取景从头顶到胸部上方，人物面对镜头，头部轻微侧倾，露出自然温柔的眯眼笑，双眼轻轻眯起，脸颊略微抬起，嘴角上扬，嘴唇基本闭合，表情轻松生动，不夸张变形。纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官结构、脸型、发型、发色、肤色与服装一致，仅改变面部表情。生成正面头肩特写，取景从头顶到胸部上方，人物面对镜头，双眼自然睁开并看向镜头，嘴唇轻轻张开，上下唇之间留出小幅间隙，下巴略微放松，呈现刚开始说话或轻声发出“啊”的自然状态，不大张嘴，不伸舌头。纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。\n以输入的人物参考图为唯一身份依据，保持同一人物的五官结构、脸型、发型、发色、肤色与服装一致，仅改变面部表情。生成正面头肩特写，取景从头顶到胸部上方，人物面对镜头，双眼自然睁开，眉毛略微抬起，嘴巴明显张大，呈自然发出“啊”的开口形状，下颌适度下移，可见合理的牙齿与口腔结构，表现轻微惊讶，不伸舌头，不夸张拉伸脸部。纯白背景，柔和摄影棚光线，写实摄影，竖版3:4，单人、无文字、无拼图。",
+      "start_index": 0,
+      "max_rows": 1000,
+      "remove_empty_lines": true
+    },
+    "class_type": "easy promptLine",
+    "_meta": {
+      "title": "角色表 Prompt (每行=一張圖)"
+    }
+  },
+  "6": {
+    "inputs": {
+      "image": "Qwen_image_2.1_Turbo_00023.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "人物參考圖 (主要輸入 1)"
+    }
+  },
+  "7": {
+    "inputs": {
+      "prompt": [
+        "5",
+        0
+      ],
+      "negative_prompt": "",
+      "resolution": 0,
+      "clip": [
+        "2",
+        0
+      ],
+      "images.image_1": [
+        "6",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "TextEncodeQwenImage21",
+    "_meta": {
+      "title": "Text Encode Qwen Image 2.1"
+    }
+  },
+  "8": {
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "Empty Latent"
+    }
+  },
+  "9": {
+    "inputs": {
+      "seed": 811922899446517,
+      "steps": 25,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "4",
+        0
+      ],
+      "positive": [
+        "7",
+        0
+      ],
+      "negative": [
+        "7",
+        1
+      ],
+      "latent_image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "10": {
+    "inputs": {
+      "samples": [
+        "9",
+        0
+      ],
+      "vae": [
+        "3",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "11": {
+    "inputs": {
+      "filename_prefix": "refmod",
+      "output_folder": [
+        "23",
+        0
+      ],
+      "caption_file_extension": ".txt",
+      "images": [
+        "10",
+        0
+      ]
+    },
+    "class_type": "SaveImageKJ",
+    "_meta": {
+      "title": "Save Image KJ → output/refmod/名稱",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  },
+  "12": {
+    "inputs": {
+      "folder": [
+        "24",
+        1
+      ],
+      "max_items": [
+        "24",
+        0
+      ],
+      "max_frames": 2,
+      "max_edge": 2112
+    },
+    "class_type": "MiniMaxH3RefModFolderLoader",
+    "_meta": {
+      "title": "Load H3 RefMod Folder"
+    }
+  },
+  "13": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "H3 Video VAE",
+      "cnr_id": "comfy-core"
+    }
+  },
+  "14": {
+    "inputs": {
+      "name": [
+        "20",
+        0
+      ],
+      "mode": "Full Reference",
+      "concept_type": "identity",
+      "background_retention": 0,
+      "ref_resolution": 1024,
+      "pool_h": 16,
+      "pool_w": 16,
+      "latent_frames": 16,
+      "identity": 0,
+      "merge": false,
+      "motion_only": false,
+      "multiplier": 1,
+      "max_tokens": 10240,
+      "description": "",
+      "save": false,
+      "extraction_preset": "manual",
+      "subfolder": "women",
+      "budget_policy": "truncate",
+      "refs_bundle": [
+        "12",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3RefModExtract",
+    "_meta": {
+      "title": "Create H3 RefMod ① Full Reference (建議)"
+    }
+  },
+  "16": {
+    "inputs": {
+      "filename_prefix": "",
+      "subfolder": [
+        "20",
+        0
+      ],
+      "mods": [
+        "14",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3RefModSave",
+    "_meta": {
+      "title": "Save H3 RefMod → models/refmods/名稱"
+    }
+  },
+  "17": {
+    "inputs": {
+      "index": 0,
+      "preview": "stored",
+      "strength": 0.5,
+      "visual_preview": "full_video",
+      "mods": [
+        "14",
+        0
+      ],
+      "vae": [
+        "13",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3RefModInspect",
+    "_meta": {
+      "title": "Inspect H3 RefMod"
+    }
+  },
+  "18": {
+    "inputs": {
+      "images": [
+        "17",
+        1
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "RefMod 預覽",
+      "cnr_id": "comfy-core"
+    }
+  },
+  "20": {
+    "inputs": {
+      "string": "women2"
+    },
+    "class_type": "StringConstant",
+    "_meta": {
+      "title": "★ RefMod 名稱 (輸入「women」)",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  },
+  "21": {
+    "inputs": {
+      "string": "/home/csheng210/ComfyUI/output/refmod"
+    },
+    "class_type": "StringConstant",
+    "_meta": {
+      "title": "圖片輸出根目錄",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  },
+  "22": {
+    "inputs": {
+      "delimiter": "/",
+      "string1": [
+        "21",
+        0
+      ],
+      "string2": [
+        "20",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "拼目錄 (根目錄/名稱)",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  },
+  "23": {
+    "inputs": {
+      "folder": [
+        "22",
+        0
+      ],
+      "delete_captions": true
+    },
+    "class_type": "RefModCleanFolder",
+    "_meta": {
+      "title": "清空目錄 (生成前必跑)"
+    }
+  },
+  "24": {
+    "inputs": {
+      "folder": [
+        "23",
+        0
+      ],
+      "last_file": [
+        "11",
+        0
+      ],
+      "min_images": 9
+    },
+    "class_type": "RefModFolderGate",
+    "_meta": {
+      "title": "結算張數 (至少 9 張)"
+    }
+  },
+  "25": {
+    "inputs": {
+      "string": "comp"
+    },
+    "class_type": "StringConstant",
+    "_meta": {
+      "title": "壓縮版後綴",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  },
+  "26": {
+    "inputs": {
+      "delimiter": "_",
+      "string1": [
+        "20",
+        0
+      ],
+      "string2": [
+        "25",
+        0
+      ]
+    },
+    "class_type": "JoinStrings",
+    "_meta": {
+      "title": "拼壓縮版名稱 (名稱_後綴)",
+      "cnr_id": "comfyui-kjnodes"
+    }
+  }
+}

@@ -30,6 +30,7 @@ export const DEFAULT_FORM = {
   refMega: 1, // 參考模型-文生影片: 目標百萬畫素(megapixels)
   trackText: 'girl in pink dress', // 參考圖片-影片生影片: 來源影片中要追蹤/替換的對象描述
   refModName: 'walkgirl', // 參考影片-生模型參考: 輸出的模型參考檔名
+  refConcept: 'identity', // 參考圖片-生模型參考: 概念類型(concept_type)
   // 輸入圖/影片的原檔 dataURL 與中繼資料: 供重新整理後還原成 File(圖片可直接還原; 影片超量時退回縮圖預覽)。
   fileData1: '',
   fileData2: '',
@@ -113,6 +114,12 @@ function serializeForm(form) {
     target: form.target || '',
     vtpModel: form.vtpModel || '',
     vtpThink: form.vtpThink !== false,
+    refConcept: form.refConcept || 'identity',
+    refModName: form.refModName || '',
+    refMod: form.refMod || '',
+    refAspect: form.refAspect || '',
+    refMega: form.refMega,
+    trackText: form.trackText || '',
     fileData1: form.fileData1 || '',
     fileData2: form.fileData2 || '',
     fileName1: form.fileName1 || '',

@@ -63,12 +63,12 @@ def build_workflow(video_name, name, ref_resolution, mode, concept_type, identit
 
 
 def _extract_saved_path(outputs):
-    """從 MiniMaxH3RefModSave 節點的 texts 取 safetensors 存檔路徑字串（找不到回空字串）。"""
-    texts = outputs.get(NODE_SAVE, {}).get("texts") or []
+    """從 MiniMaxH3RefModSave 節點的 text/texts 取 safetensors 存檔路徑字串（找不到回空字串）。"""
+    texts = outputs.get(NODE_SAVE, {}).get("text") or outputs.get(NODE_SAVE, {}).get("texts") or []
     if not texts:
         for out in outputs.values():
-            if out.get("texts"):
-                texts = out["texts"]
+            if out.get("text") or out.get("texts"):
+                texts = out.get("text") or out.get("texts")
                 break
     return str(texts[0]) if texts else ""
 

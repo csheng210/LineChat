@@ -86,6 +86,7 @@ import run_ref2video
 import run_refmode_t2v
 import run_iv2v
 import run_video2refmod
+import run_image2refmod
 import run_refmod_video2video
 import run_bgremove_qwen
 import run_upscale_qwen
@@ -2384,6 +2385,36 @@ def job_video2refmod(
         finally:
             try:
                 os.remove(p_vid)
+            except OSError:
+                pass
+
+    _start_job(job_id, runner)
+    return {"job_id": job_id}
+
+
+@app.post("/job/image2refmod")
+def job_image2refmod(
+    image: UploadFile = File(...),
+    name: Optional[str] = Form("refmod"),
+    concept_type: Optional[str] = Form("identity"),
+    ref_resolution: Optional[int] = Form(1024),
+    mode: Optional[str] = Form("Full Reference"),
+):
+    d_img = image.file.read()
+    if not d_img:
+        raise HTTPException(status_code=400, detail="image 不可為空")
+    p_img = _temp_png(d_img)
+    job_id = _new_job()
+
+    def runner(cb, cancel_event, prompt_id_cb):
+        try:
+            return run_image2refmod.generate(
+                image_path=p_img, name=name, concept_type=concept_type,
+                ref_resolution=ref_resolution, mode=mode,
+                log=lambda *_: None, progress_cb=cb, cancel_event=cancel_event, prompt_id_cb=prompt_id_cb)
+        finally:
+            try:
+                os.remove(p_img)
             except OSError:
                 pass
 

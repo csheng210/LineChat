@@ -31,6 +31,21 @@ function parseVtpModels(raw) {
 }
 export const VTP_MODELS = parseVtpModels(import.meta.env.VITE_VTP_MODELS)
 
+// 參考圖片-生模型參考: concept_type 選項(對應 MiniMaxH3RefModExtract 節點的 COMBO 清單)。
+export const CONCEPT_TYPES = [
+  { id: 'identity', label: 'identity（人物/角色身分）' },
+  { id: 'pose_motion', label: 'pose_motion（姿勢/動作/鏡頭運動）' },
+  { id: 'clothing', label: 'clothing（服裝）' },
+  { id: 'background', label: 'background（背景）' },
+  { id: 'voice', label: 'voice（聲音）' },
+  { id: 'singing', label: 'singing（歌唱）' },
+  { id: 'music_style', label: 'music_style（音樂風格）' },
+  { id: 'sound_fx', label: 'sound_fx（音效）' },
+  { id: 'ambience', label: 'ambience（環境音）' },
+  { id: 'style', label: 'style（風格）' },
+  { id: 'generic', label: 'generic（通用）' },
+]
+
 // ComfyUI 生圖/生影片頁面: 功能按鈕在 status bar(AuthGate), 此處依 active 產生表單與結果。
 //   經 Vite proxy /comfy/* -> ComfyAPI(FastAPI)。
 //   生成採非同步任務: POST /comfy/job/* 回 job_id, 由 genStore 輪詢 /comfy/job?id= 更新進度, 完成顯示圖/影片。
@@ -116,7 +131,7 @@ export default function ImageGen({ active }) {
   const form = snap.forms[active] || DEFAULT_FORM
   const job = snap.jobs[active] || EMPTY_JOB
 
-  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target, vtpModel, vtpThink, refMod, refAspect, refMega, trackText, refModName } = form
+  const { prompt, width, height, seed, duration, image1, image2, preview1, preview2, target, vtpModel, vtpThink, refMod, refAspect, refMega, trackText, refModName, refConcept } = form
   const { busy, progress, phase, cancelling, stopped, error, result } = job
 
   const fn = FUNCTIONS.find((f) => f.id === active) || FUNCTIONS[0]
@@ -128,6 +143,7 @@ export default function ImageGen({ active }) {
   const isIv2v = active === 'iv2v'
   const isVideo2Refmod = active === 'video2refmod'
   const isRefmodV2v = active === 'refmodV2v'
+  const isImage2Refmod = active === 'image2refmod'
   const [copied, setCopied] = useState(false)
   const [videoUrl, setVideoUrl] = useState('') // 反推提示詞選影片: 內嵌播放器用的來源 URL
   const [picker, setPicker] = useState(null) // { dir, kind, slot } 伺服器 Resources 選取彈窗
@@ -186,10 +202,11 @@ export default function ImageGen({ active }) {
   }
 
   function validate() {
-    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'images2video' && active !== 'reversePrompt' && active !== 'iv2v' && active !== 'video2refmod' && active !== 'refmodV2v' && !prompt.trim()) return '請輸入提示詞'
+    if (active !== 'bgremove' && active !== 'upscale' && active !== 'image2video' && active !== 'images2video' && active !== 'reversePrompt' && active !== 'iv2v' && active !== 'video2refmod' && active !== 'refmodV2v' && active !== 'image2refmod' && !prompt.trim()) return '請輸入提示詞'
     if (active === 'reversePrompt') return image1 ? '' : '請選擇圖片或影片'
     if (isVideo2Refmod) return image1 ? '' : '請選擇來源影片'
     if (isRefmodV2v) return image1 ? '' : '請選擇來源影片'
+    if (isImage2Refmod) return image1 ? '' : '請選擇人物參考圖'
     if ((active === 'image1' || active === 'bgremove' || active === 'upscale') && !image1) return '請選擇輸入圖'
     if (active === 'image2' && (!image1 || !image2)) return '請選擇兩張圖(圖一/圖二)'
     if (active === 'image2video' && !image1) return '請選擇輸入圖'
@@ -231,6 +248,13 @@ export default function ImageGen({ active }) {
       fd.append('video', image1)
       if (refModName.trim()) fd.append('name', refModName.trim())
       return { endpoint: '/job/video2refmod', form: fd }
+    }
+    if (active === 'image2refmod') {
+      const fd = new FormData()
+      fd.append('image', image1)
+      if (refModName.trim()) fd.append('name', refModName.trim())
+      if (refConcept) fd.append('concept_type', refConcept)
+      return { endpoint: '/job/image2refmod', form: fd }
     }
     if (active === 'refmodeT2v') {
       return {
@@ -333,7 +357,7 @@ export default function ImageGen({ active }) {
 
   const showSize = active === 'text2img' // 純文生圖才顯示長寬輸入
   const showDuration = isVideo || isFl2v || isRefMode || isIv2v // 影片類功能才顯示秒數（refmodV2v 秒數由來源影片決定）
-  const showImages = active === 'image1' || active === 'image2' || isVideo || isFl2v || active === 'bgremove' || active === 'upscale' || isReverse || isIv2v || isVideo2Refmod || isRefmodV2v
+  const showImages = active === 'image1' || active === 'image2' || isVideo || isFl2v || active === 'bgremove' || active === 'upscale' || isReverse || isIv2v || isVideo2Refmod || isRefmodV2v || isImage2Refmod
   const pct = Math.round(progress * 100)
 
   return (
@@ -349,7 +373,7 @@ export default function ImageGen({ active }) {
             <div className="gen-images">
               <label className="gen-upload">
                 <span className="gen-upload-label">
-                  {(isVideo2Refmod || isRefmodV2v) ? '來源影片' : isIv2v ? '參考圖（要換成的人物）' : isReverse ? '輸入圖/影片' : isFl2v ? '首圖（第一幀）' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
+                  {(isVideo2Refmod || isRefmodV2v) ? '來源影片' : isImage2Refmod ? '人物參考圖' : isIv2v ? '參考圖（要換成的人物）' : isReverse ? '輸入圖/影片' : isFl2v ? '首圖（第一幀）' : (isVideo || active === 'bgremove' || active === 'upscale') ? '輸入圖' : ('圖一' + (active === 'image2' ? '（長寬依據）' : ''))}
                 </span>
                 <input
                   type="file"
@@ -418,6 +442,23 @@ export default function ImageGen({ active }) {
               <span className="gen-field-label">模型參考檔名（輸出到伺服器 models/refmods/&lt;name&gt;_visual.safetensors）</span>
               <input className="gen-textarea" type="text" value={refModName} onChange={(e) => setForm(active, { refModName: e.target.value })} />
             </label>
+          )}
+
+          {isImage2Refmod && (
+            <Fragment>
+            <label className="gen-field">
+              <span className="gen-field-label">RefMod 名稱（輸出到伺服器 models/refmods/&lt;name&gt;）</span>
+              <input className="gen-textarea" type="text" value={refModName} onChange={(e) => setForm(active, { refModName: e.target.value })} />
+            </label>
+            <label className="gen-field">
+              <span className="gen-field-label">概念類型 concept_type（這張參考圖代表什麼）</span>
+              <select className="gen-textarea" value={refConcept} onChange={(e) => setForm(active, { refConcept: e.target.value })}>
+                {CONCEPT_TYPES.map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </label>
+            </Fragment>
           )}
 
           {isIv2v && (
@@ -514,6 +555,8 @@ export default function ImageGen({ active }) {
             </label>
             </Fragment>
           ) : (
+            <Fragment>
+            {!isImage2Refmod && (
             <label className="gen-field">
               <span className="gen-field-label">提示詞</span>
               <textarea
@@ -525,6 +568,8 @@ export default function ImageGen({ active }) {
               />
               <button type="button" className="gen-server-btn" onClick={() => setPicker({ dir: 'Prompt', kind: 'prompt' })}>從 Prompt 目錄挑選</button>
             </label>
+            )}
+            </Fragment>
           )}
 
           {showSize && (
@@ -644,13 +689,13 @@ export default function ImageGen({ active }) {
                 <img className="gen-result-img" src={result.image} alt="生成結果" />
               ) : (
                 <div className="gen-result-prompt gen-result-prompt-only">
-                  <div className="gen-result-prompt-title">{isVideo2Refmod ? '模型參考檔（伺服器端）' : '反推提示詞'}</div>
+                  <div className="gen-result-prompt-title">{(isVideo2Refmod || isImage2Refmod) ? '模型參考檔（伺服器端）' : '反推提示詞'}</div>
                   <p>{stripThink(result.prompt)}</p>
                 </div>
               )}
               {result.prompt && (result.image || result.video) && (
                 <div className="gen-result-prompt">
-                  <div className="gen-result-prompt-title">{isVideo2Refmod ? '模型參考檔（伺服器端）' : '輸出提示詞'}</div>
+                  <div className="gen-result-prompt-title">{(isVideo2Refmod || isImage2Refmod) ? '模型參考檔（伺服器端）' : '輸出提示詞'}</div>
                   <p>{result.prompt}</p>
                 </div>
               )}
